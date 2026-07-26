@@ -16,19 +16,19 @@ class SetupScreen(ctk.CTkFrame):
         wrapper.place(relx=0.5, rely=0.5, anchor="center")
 
         ctk.CTkLabel(
-            wrapper, text="Spraying Dashboard",
+            wrapper, text="Camera Dashboard",
             font=ctk.CTkFont(size=26, weight="bold")
         ).pack(pady=(0, 4))
 
         ctk.CTkLabel(
-            wrapper, text="Select an input source to begin",
-            font=ctk.CTkFont(size=14), text_color="gray60"
+            wrapper, text="Select an Input",
+            font=ctk.CTkFont(size=20, weight="normal"), text_color="gray60"
         ).pack(pady=(0, 24))
 
         self._make_card(
             wrapper,
             title="Local Setup",
-            subtitle="Use this computer's webcam or a connected RealSense camera",
+            subtitle="Use this computer's Webcam or an external Camera",
             command=self._choose_local,
             accent="#2563eb",
         )
@@ -36,29 +36,20 @@ class SetupScreen(ctk.CTkFrame):
         self._make_card(
             wrapper,
             title="Remote Setup",
-            subtitle="Stream from a Raspberry Pi in the field  ·  coming soon",
+            subtitle="Stream from a Raspberry Pi remotely ~ coming soon",
             command=self._choose_remote,
-            accent="#6b7280",
+            accent="#cb2d2d",
         )
 
     def _make_card(self, parent, title, subtitle, command, accent):
         card = ctk.CTkButton(
-            parent, text="", command=command,
+            parent, text=f"{title}\n{subtitle}", command=command,
             width=380, height=76, corner_radius=12,
             fg_color="#1f2937", hover_color="#27303f",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="white",
         )
         card.pack(pady=8)
-
-        # overlay text on top of the button using place, so we get two-line
-        # rich text on a single clickable surface
-        label = ctk.CTkLabel(
-            card, text=f"{title}\n{subtitle}",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            justify="left", text_color="white",
-        )
-        label.place(relx=0.06, rely=0.5, anchor="w")
-        # forward clicks on the label to the button underneath
-        label.bind("<Button-1>", lambda e: command())
 
         strip = ctk.CTkFrame(card, width=6, height=76, fg_color=accent, corner_radius=0)
         strip.place(relx=0.0, rely=0.5, anchor="w")

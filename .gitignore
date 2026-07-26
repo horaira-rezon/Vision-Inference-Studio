@@ -11,3 +11,4 @@ __pycache__/
 # Private local drafts
 /private-drafts/
 /assets/camera/realsense.py
+.claude/
