@@ -12,21 +12,25 @@ class SetupScreen(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent")
         self.on_local_selected = on_local_selected
 
-        wrapper = ctk.CTkFrame(self, fg_color="transparent")
+        wrapper = ctk.CTkFrame(self, fg_color="#191919", border_width=2, border_color="#2B2B2B", corner_radius=8)
         wrapper.place(relx=0.5, rely=0.5, anchor="center")
 
-        ctk.CTkLabel(
-            wrapper, text="Camera Dashboard",
-            font=ctk.CTkFont(size=26, weight="bold")
-        ).pack(pady=(0, 4))
+        # Inner frame for padding
+        inner = ctk.CTkFrame(wrapper, fg_color="transparent")
+        inner.pack(fill="both", expand=True, padx=37, pady=37)
 
         ctk.CTkLabel(
-            wrapper, text="Select an Input",
-            font=ctk.CTkFont(size=20, weight="normal"), text_color="gray60"
-        ).pack(pady=(0, 24))
+            inner, text="Camera Dashboard",
+            font=ctk.CTkFont(size=50, weight="bold")
+        ).pack(pady=(0, 22))
+
+        ctk.CTkLabel(
+            inner, text="Select an Input from below ↓",
+            font=ctk.CTkFont(size=23, weight="normal"), text_color="gray60"
+        ).pack(pady=(0, 26))
 
         self._make_card(
-            wrapper,
+            inner,
             title="Local Setup",
             subtitle="Use this computer's Webcam or an external Camera",
             command=self._choose_local,
@@ -34,7 +38,7 @@ class SetupScreen(ctk.CTkFrame):
         )
 
         self._make_card(
-            wrapper,
+            inner,
             title="Remote Setup",
             subtitle="Stream from a Raspberry Pi remotely ~ coming soon",
             command=self._choose_remote,
@@ -42,13 +46,13 @@ class SetupScreen(ctk.CTkFrame):
         )
 
     def _make_card(self, parent, title, subtitle, command, accent):
-        card = ctk.CTkFrame(parent, width=400, height=100, corner_radius=12, fg_color="#1f2937")
-        card.pack(pady=8)
+        card = ctk.CTkFrame(parent, width=450, height=80, corner_radius=12, fg_color="#151c26")
+        card.pack(pady=10)
         # hover effect
         def on_enter(e):
-            card.configure(fg_color="#27303f")
-        def on_leave(e):
             card.configure(fg_color="#1f2937")
+        def on_leave(e):
+            card.configure(fg_color="#151c26")
         card.bind("<Enter>", on_enter)
         card.bind("<Leave>", on_leave)
         card.bind("<Button-1>", lambda e: command())
