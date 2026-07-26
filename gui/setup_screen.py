@@ -17,12 +17,12 @@ class SetupScreen(ctk.CTkFrame):
 
         ctk.CTkLabel(
             wrapper, text="Camera Dashboard",
-            font=ctk.CTkFont(size=36, weight="bold")
+            font=ctk.CTkFont(size=26, weight="bold")
         ).pack(pady=(0, 4))
 
         ctk.CTkLabel(
             wrapper, text="Select an Input",
-            font=ctk.CTkFont(size=30, weight="normal"), text_color="gray60"
+            font=ctk.CTkFont(size=20, weight="normal"), text_color="gray60"
         ).pack(pady=(0, 24))
 
         self._make_card(
