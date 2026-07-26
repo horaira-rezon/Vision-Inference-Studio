@@ -1,20 +1,3 @@
-"""
-Main application screen.
-
-Changes in this version:
-  - Video stream is deliberately smaller than the panel by default (leaves
-    a blank margin, especially at the top) instead of filling all available
-    height.
-  - Notices ("Screenshot saved", "No camera detected", etc.) now float as
-    plain text over the blank space above the stream - no colored box.
-  - Camera / Model / Arduino sections in the sidebar only show a small
-    status dot (persistent state); all messages for those three go to the
-    notice area instead of text under their buttons.
-  - Recording and Screenshot each get their own persistent folder-selection
-    button + current-folder label, always visible above the action button.
-    Once set, that folder is reused until you pick a different one.
-"""
-
 import tkinter as tk
 import customtkinter as ctk
 from tkinter import filedialog
@@ -65,6 +48,7 @@ class MainApp(ctk.CTkFrame):
         self.current_frame = None
 
         self.mouse_x, self.mouse_y = 0, 0
+        self.mouse_clicked = False  # True after first click in click mode
         self.display_scale = 1.0  # updated every frame by _scale_to_panel
         self.recording_start_time = None
         self._recording_after_id = None
@@ -179,6 +163,14 @@ class MainApp(ctk.CTkFrame):
 
     # --------------------------------------------------------- video area
     def _build_video_area(self):
+        # shared layout constants - used here AND in _scale_to_panel, so the
+        # video's placement and its available scaling space never drift out
+        # of sync with each other
+        self.SIDE_MARGIN = 50
+        self.TOP_MARGIN = 40
+        self.BOTTOM_GAP = 130     # reserved band at the bottom for the notice
+        self.SIZE_SHRINK = 0.82   # extra shrink beyond best-fit -> noticeably smaller by default
+
         outer = ctk.CTkFrame(self, corner_radius=0, fg_color="#0b0d10")
         outer.grid(row=0, column=1, sticky="nsew")
         self.video_frame = outer  # _scale_to_panel reads this size each frame
@@ -186,19 +178,22 @@ class MainApp(ctk.CTkFrame):
         self.video_label = tk.Label(outer, bg="#0b0d10", fg="white",
                                      text="Select a camera to begin",
                                      font=("Arial", 14))
-        # placed slightly below center (rely=0.55), and deliberately kept
-        # smaller than the panel by _scale_to_panel, so there is always
-        # blank space above it for notices to float over
-        self.video_label.place(relx=0.5, rely=0.55, anchor="center")
+        # Centered within the region ABOVE the reserved bottom gap (not the
+        # whole window) - shifting up by half the (gap - top margin) keeps
+        # it visually centered in its own area rather than the full panel.
+        self.video_label.place(relx=0.5, rely=0.5, anchor="center",
+                                y=(self.TOP_MARGIN - self.BOTTOM_GAP) // 2)
         self.video_label.bind("<Button-1>", self._on_click)
 
-        # floating notice - plain text, no background box, sits in the
-        # blank space above the stream and clears itself automatically
+        # floating notice - vertically centered in the gap between the
+        # video's bottom edge and the window's bottom edge (not glued to
+        # either one)
         self.notice_bar = ctk.CTkLabel(
-            outer, text="", font=ctk.CTkFont(size=15),
+            outer, text="", font=ctk.CTkFont(size=20),
             fg_color="transparent", text_color=NOTICE_COLORS["idle"],
         )
-        self.notice_bar.place(relx=0.5, rely=0.05, anchor="n")
+        self.notice_bar.place(relx=0.5, rely=1.0, anchor="center",
+                               y=-(self.BOTTOM_GAP // 2))
 
     def _show_notice(self, text, color_key="ok"):
         self.notice_bar.configure(text=text, text_color=NOTICE_COLORS.get(color_key, "gray70"))
@@ -245,6 +240,7 @@ class MainApp(ctk.CTkFrame):
         self.camera_btn.configure(state="disabled", text="Camera Locked")
         self._set_dot(self.camera_dot, "ok")
         self._show_notice(f"Camera ready: {choice}", "ok")
+        self.mouse_clicked = False  # reset click flag for new camera
         self.update_frame()
 
     # ------------------------------------------------------ model
@@ -265,6 +261,7 @@ class MainApp(ctk.CTkFrame):
         self.model = None
         self._set_dot(self.model_dot, "warn")
         self._show_notice("Click mode enabled (no detection)", "warn")
+        self.mouse_clicked = False  # reset click flag when entering click mode
 
 
     # --------------------------------------------------- arduino (toggle)
@@ -361,6 +358,7 @@ class MainApp(ctk.CTkFrame):
         # original camera resolution so depth/detection lookups stay correct
         self.mouse_x = int(event.x / self.display_scale)
         self.mouse_y = int(event.y / self.display_scale)
+        self.mouse_clicked = True  # mark that user has clicked
 
     # ------------------------------------------------------- frame loop
     def update_frame(self):
@@ -389,16 +387,14 @@ class MainApp(ctk.CTkFrame):
         self.after(15, self.update_frame)
 
     def _scale_to_panel(self, image):
-        """Resizes the frame to a bit smaller than the available panel
-        (reserving space at the top for notices), preserving aspect ratio.
-        current_frame/recorder always keep the un-scaled, full-resolution
-        image - only the on-screen display is affected."""
-        top_reserved = 70     # kept blank for the notice text
-        side_margin = 30
-        bottom_margin = 30
-
-        panel_w = self.video_frame.winfo_width() - (side_margin * 2)
-        panel_h = self.video_frame.winfo_height() - top_reserved - bottom_margin
+        """Resizes the frame using the SAME margins/gap reserved in
+        _build_video_area, so the video is noticeably smaller than the full
+        panel by default while keeping aspect ratio exact (single uniform
+        scale factor - never stretched). current_frame/recorder always keep
+        the un-scaled, full-resolution image; only the on-screen display is
+        affected."""
+        panel_w = self.video_frame.winfo_width() - (self.SIDE_MARGIN * 2)
+        panel_h = self.video_frame.winfo_height() - self.TOP_MARGIN - self.BOTTOM_GAP
         img_h, img_w = image.shape[:2]
 
         if panel_w < 10 or panel_h < 10:
@@ -406,17 +402,18 @@ class MainApp(ctk.CTkFrame):
             return image
 
         fit_scale = min(panel_w / img_w, panel_h / img_h)
-        # 0.9 keeps it a bit smaller than a full fit by default;
-        # capping at 1.0 means it's never enlarged past native resolution
-        scale = min(fit_scale * 0.9, 1.0)
-        scale = max(scale, 0.01)
+        scale = max(fit_scale * self.SIZE_SHRINK, 0.01)
         self.display_scale = scale
 
         new_w, new_h = int(img_w * scale), int(img_h * scale)
         return cv2.resize(image, (new_w, new_h))
 
     def _draw_click_mode(self, image, depth_frame, cx, cy):
-        mx, my = self.mouse_x, self.mouse_y
+        # Use center as mouse point until first click
+        if self.mouse_clicked:
+            mx, my = self.mouse_x, self.mouse_y
+        else:
+            mx, my = cx, cy
 
         if self.camera_source.has_depth and depth_frame is not None:
             point = self.camera_source.deproject(mx, my, depth_frame)
@@ -429,11 +426,11 @@ class MainApp(ctk.CTkFrame):
 
                 overlay.draw_click_marker(image, cx, cy, mx, my)
                 lines = [
-                    (f"Diag Dist: {diag:.3f} m", (255, 255, 255)),
-                    (f"Target Ang: {angle:.1f} deg ({direction})", (200, 255, 200)),
+                    (f"Diag Dist: {diag:.3f} m", (0, 255, 0)),
+                    (f"Target Ang: {angle:.1f} deg ({direction})", (0, 255, 0)),
                 ]
                 if self.arduino and self.arduino.is_connected:
-                    lines.append((f"Nozzle At: {self.arduino.current_angle:.1f} deg", (255, 200, 200)))
+                    lines.append((f"Nozzle At: {self.arduino.current_angle:.1f} deg", (0, 255, 0)))
                 overlay.draw_text_lines(image, lines)
             else:
                 overlay.draw_click_marker(image, cx, cy, mx, my, color=(0, 0, 255))
@@ -441,7 +438,7 @@ class MainApp(ctk.CTkFrame):
         else:
             dist = pixel_distance(cx, cy, mx, my)
             overlay.draw_click_marker(image, cx, cy, mx, my)
-            overlay.draw_text_lines(image, [(f"Pixel Dist: {dist:.1f} px", (255, 255, 255))])
+            overlay.draw_text_lines(image, [(f"Pixel Dist: {dist:.1f} px", (0, 255, 0))])
 
     def _draw_detections(self, image, depth_frame):
         detections = self.model.detect(image)
@@ -457,7 +454,7 @@ class MainApp(ctk.CTkFrame):
                     if self.arduino and self.arduino.is_connected:
                         self.arduino.send_target_angle(angle)
                         cv2.putText(image, f"{angle:.1f} deg", (x1, y2 + 16),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 200), 2)
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
     # ------------------------------------------------------------ close
     def on_close(self):
