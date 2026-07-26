@@ -85,13 +85,12 @@ class MainApp(ctk.CTkFrame):
         )
 
         # --- Camera ---
-        self._section_label(sidebar, "1. Camera")
+        self.camera_dot = self._section_label_with_dot(sidebar, "1. Camera")
         self.camera_btn = ctk.CTkButton(sidebar, text="Select Camera", command=self.select_camera)
         self.camera_btn.pack(fill="x", padx=16, pady=(4, 2))
-        self.camera_dot = self._status_dot(sidebar)
 
         # --- Model ---
-        self._section_label(sidebar, "2. Detection Model")
+        self.model_dot = self._section_label_with_dot(sidebar, "2. Detection Model")
         self.model_btn = ctk.CTkButton(sidebar, text="Select Model Weight (.pt)", command=self.select_model)
         self.model_btn.pack(fill="x", padx=16, pady=(4, 2))
         self.skip_model_btn = ctk.CTkButton(
@@ -99,16 +98,14 @@ class MainApp(ctk.CTkFrame):
             fg_color="#6b7280", hover_color="#4b5563",
         )
         self.skip_model_btn.pack(fill="x", padx=16, pady=(0, 2))
-        self.model_dot = self._status_dot(sidebar)
 
         # --- Arduino ---
-        self._section_label(sidebar, "3. Arduino")
+        self.arduino_dot = self._section_label_with_dot(sidebar, "3. Arduino")
         self.arduino_btn = ctk.CTkButton(
             sidebar, text="Connect Arduino", command=self.toggle_arduino,
             fg_color="#065f46", hover_color="#047857",
         )
         self.arduino_btn.pack(fill="x", padx=16, pady=(4, 2))
-        self.arduino_dot = self._status_dot(sidebar)
 
         # --- Recording ---
         self._section_label(sidebar, "4. Recording")
@@ -120,7 +117,7 @@ class MainApp(ctk.CTkFrame):
         self.video_folder_btn.pack(fill="x", padx=16, pady=(4, 2))
         self.video_folder_label = ctk.CTkLabel(
             sidebar, text=self._short_path(self.settings.get("video_output_dir")) or "No folder selected",
-            font=ctk.CTkFont(size=11), text_color="gray60", anchor="w", justify="left",
+            font=ctk.CTkFont(size=15), text_color="gray60", anchor="w", justify="left",
         )
         self.video_folder_label.pack(anchor="w", padx=16, pady=(0, 8), fill="x")
 
@@ -140,7 +137,7 @@ class MainApp(ctk.CTkFrame):
         self.screenshot_folder_btn.pack(fill="x", padx=16, pady=(4, 2))
         self.screenshot_folder_label = ctk.CTkLabel(
             sidebar, text=self._short_path(self.settings.get("screenshot_output_dir")) or "No folder selected",
-            font=ctk.CTkFont(size=11), text_color="gray60", anchor="w", justify="left",
+            font=ctk.CTkFont(size=15), text_color="gray60", anchor="w", justify="left",
         )
         self.screenshot_folder_label.pack(anchor="w", padx=16, pady=(0, 8), fill="x")
 
@@ -152,18 +149,24 @@ class MainApp(ctk.CTkFrame):
 
     def _section_label(self, parent, text):
         ctk.CTkLabel(
-            parent, text=text, font=ctk.CTkFont(size=13, weight="bold"), text_color="gray70"
+            parent, text=text, font=ctk.CTkFont(size=15, weight="bold"), text_color="gray70"
         ).pack(anchor="w", padx=16, pady=(16, 2))
 
-    def _status_dot(self, parent):
-        """Small persistent colored dot - no text - used for Camera/Model/
-        Arduino so their sidebar sections stay uncluttered; messages for
-        these three now go to the notice area above the stream instead."""
-        row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(anchor="w", padx=16, pady=(0, 10))
-        dot = ctk.CTkLabel(row, text="", width=12, height=12, corner_radius=0,
-                            fg_color=DOT_COLORS["idle"])
-        dot.pack(side="left")
+    def _section_label_with_dot(self, parent, text):
+        """Create a section label with a status dot right after it."""
+        container = ctk.CTkFrame(parent, fg_color="transparent")
+        container.pack(anchor="w", padx=16, pady=(16, 2))
+
+        label = ctk.CTkLabel(
+            container, text=text, font=ctk.CTkFont(size=15, weight="bold"), text_color="gray70"
+        )
+        label.pack(side="left")
+
+        # Use a CTkFrame for the dot to have precise control over dimensions
+        dot = ctk.CTkFrame(container, width=12, height=12, corner_radius=6,
+                          fg_color=DOT_COLORS["idle"])
+        dot.pack(side="left", padx=(7, 0))
+        dot.pack_propagate(False)  # Prevent the frame from shrinking to fit contents
         return dot
 
     def _set_dot(self, dot, color_key):

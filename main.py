@@ -17,7 +17,7 @@ class RootController:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Spraying Dashboard")
+        self.root.title("Camera Dashboard")
         self.root.geometry("1600x900")
         self.root.minsize(900, 550)
 
