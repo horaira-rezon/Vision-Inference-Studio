@@ -1,0 +1,8 @@
+{
+  "video_output_dir": "/home/allsabaab/Downloads/others",
+  "screenshot_output_dir": "/home/allsabaab/Downloads/others",
+  "arduino_port": "/dev/ttyACM0",
+  "arduino_baud": 115200,
+  "steps_per_degree": 1.1111111111111112,
+  "command_delay": 0.1
+}
