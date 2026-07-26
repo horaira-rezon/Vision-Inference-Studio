@@ -17,12 +17,12 @@ class SetupScreen(ctk.CTkFrame):
 
         ctk.CTkLabel(
             wrapper, text="Camera Dashboard",
-            font=ctk.CTkFont(size=26, weight="bold")
+            font=ctk.CTkFont(size=36, weight="bold")
         ).pack(pady=(0, 4))
 
         ctk.CTkLabel(
             wrapper, text="Select an Input",
-            font=ctk.CTkFont(size=20, weight="normal"), text_color="gray60"
+            font=ctk.CTkFont(size=30, weight="normal"), text_color="gray60"
         ).pack(pady=(0, 24))
 
         self._make_card(
@@ -42,17 +42,27 @@ class SetupScreen(ctk.CTkFrame):
         )
 
     def _make_card(self, parent, title, subtitle, command, accent):
-        card = ctk.CTkButton(
-            parent, text=f"{title}\n{subtitle}", command=command,
-            width=380, height=76, corner_radius=12,
-            fg_color="#1f2937", hover_color="#27303f",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color="white",
-        )
+        card = ctk.CTkFrame(parent, width=400, height=100, corner_radius=12, fg_color="#1f2937")
         card.pack(pady=8)
-
-        strip = ctk.CTkFrame(card, width=6, height=76, fg_color=accent, corner_radius=0)
+        # hover effect
+        def on_enter(e):
+            card.configure(fg_color="#27303f")
+        def on_leave(e):
+            card.configure(fg_color="#1f2937")
+        card.bind("<Enter>", on_enter)
+        card.bind("<Leave>", on_leave)
+        card.bind("<Button-1>", lambda e: command())
+        # accent strip
+        strip = ctk.CTkFrame(card, width=6, height=100, fg_color=accent, corner_radius=0)
         strip.place(relx=0.0, rely=0.5, anchor="w")
+        # title label
+        title_label = ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=20, weight="bold"), text_color="white", anchor="w")
+        title_label.place(relx=0.06, rely=0.3, anchor="w")
+        title_label.bind("<Button-1>", lambda e: command())
+        # subtitle label
+        subtitle_label = ctk.CTkLabel(card, text=subtitle, font=ctk.CTkFont(size=17), text_color="white", anchor="w")
+        subtitle_label.place(relx=0.06, rely=0.7, anchor="w")
+        subtitle_label.bind("<Button-1>", lambda e: command())
 
     def _choose_local(self):
         self.on_local_selected()
@@ -60,5 +70,5 @@ class SetupScreen(ctk.CTkFrame):
     def _choose_remote(self):
         messagebox.showinfo(
             "Remote Setup",
-            "Underdeveloped: remote (Raspberry Pi) mode is not available yet."
+            "Underdeveloped: remote mode is not available yet."
         )
