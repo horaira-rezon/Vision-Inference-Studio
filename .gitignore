@@ -8,7 +8,8 @@
 __pycache__/
 *.pyc
 
-# Private local drafts
+# Private local files
 /private-drafts/
 /assets/camera/realsense.py
 .claude/
+/assets/assets/
