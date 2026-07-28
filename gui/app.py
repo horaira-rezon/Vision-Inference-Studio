@@ -1,23 +1,25 @@
 import tkinter as tk
 import customtkinter as ctk
-from tkinter import filedialog
 from PIL import Image, ImageTk
 import cv2
 import time
+import threading
 from datetime import datetime
 
 from assets.camera.manager import CameraManager
 from assets.detection.yolo_engine import YoloEngine
+from assets.detection.detection_worker import DetectionWorker
 from assets.communication.serial_com import ArduinoLink, SERIAL_AVAILABLE
 from assets.recording.recorder import Recorder
 from assets.visualization import overlay
 from assets.transform.coordinates import pixel_distance
+from assets.ui.file_dialogs import choose_file, choose_directory
 
 # private/ is .gitignored - these imports fail gracefully if it's missing,
 # so the app still runs (RGB webcam mode) on a machine without it
 try:
-    from private.nozzle_targeting import NozzleTargeting
-    from private.nozzle_bridge import compute_target
+    from my_version.nozzle_targeting import NozzleTargeting
+    from my_version.nozzle_bridge import compute_target
     PRIVATE_MODULE_AVAILABLE = True
 except ImportError:
     NozzleTargeting = None
@@ -52,7 +54,7 @@ class MainApp(ctk.CTkFrame):
         self.camera_locked = False
 
         self.model = None
-        self.model_locked = False
+        self.detection_worker = None
 
         self.arduino = None
         self.nozzle = NozzleTargeting() if PRIVATE_MODULE_AVAILABLE else None
@@ -257,19 +259,36 @@ class MainApp(ctk.CTkFrame):
 
     # ------------------------------------------------------ model
     def select_model(self):
-        path = filedialog.askopenfilename(filetypes=[("PyTorch weights", "*.pt")])
+        path = choose_file("Select Model Weight", pattern="*.pt", pattern_label="PyTorch weights")
         if not path:
             return
+        self._show_notice("Loading model...", "warn")
+        threading.Thread(target=self._load_model_async, args=(path,), daemon=True).start()
+
+    def _load_model_async(self, path):
         try:
-            self.model = YoloEngine(path)
+            model = YoloEngine(path)
         except Exception as e:
-            self._set_dot(self.model_dot, "error")
-            self._show_notice(str(e), "error")
+            self.after(0, lambda: self._on_model_load_failed(str(e)))
             return
+        self.after(0, lambda: self._on_model_loaded(model, path))
+
+    def _on_model_loaded(self, model, path):
+        if self.detection_worker:
+            self.detection_worker.stop()
+        self.model = model
+        self.detection_worker = DetectionWorker(model)
         self._set_dot(self.model_dot, "ok")
         self._show_notice(f"Model loaded: {path.split('/')[-1]}", "ok")
 
+    def _on_model_load_failed(self, message):
+        self._set_dot(self.model_dot, "error")
+        self._show_notice(message, "error")
+
     def skip_model(self):
+        if self.detection_worker:
+            self.detection_worker.stop()
+            self.detection_worker = None
         self.model = None
         self._set_dot(self.model_dot, "warn")
         self._show_notice("Click mode enabled (no detection)", "warn")
@@ -302,7 +321,7 @@ class MainApp(ctk.CTkFrame):
 
     # -------------------------------------------------------- recording
     def select_video_folder(self):
-        folder = filedialog.askdirectory(title="Select folder to save VIDEO recordings")
+        folder = choose_directory("Select folder to save VIDEO recordings")
         if not folder:
             return
         self.settings.set("video_output_dir", folder)
@@ -310,7 +329,7 @@ class MainApp(ctk.CTkFrame):
         self._show_notice("Video folder set", "ok")
 
     def select_screenshot_folder(self):
-        folder = filedialog.askdirectory(title="Select folder to save SCREENSHOTS")
+        folder = choose_directory("Select folder to save SCREENSHOTS")
         if not folder:
             return
         self.settings.set("screenshot_output_dir", folder)
@@ -437,8 +456,13 @@ class MainApp(ctk.CTkFrame):
             "text_lines": [],
         }
 
-        if self.model is not None:
-            detections = self.model.detect(image)
+        if self.model is not None and self.detection_worker is not None:
+            # Non-blocking: hand off this frame to the background worker and
+            # draw whatever it most recently finished (may lag a frame or
+            # two behind on a slow model, but the video feed itself never
+            # freezes waiting on inference).
+            self.detection_worker.submit_frame(image)
+            detections = self.detection_worker.get_latest_detections()
             for i, det in enumerate(detections):
                 x1, y1, x2, y2 = det["box"]
                 plan["boxes"].append((x1, y1, x2, y2, det["label"], det["conf"]))
@@ -520,3 +544,5 @@ class MainApp(ctk.CTkFrame):
             self.camera_source.stop()
         if self.arduino:
             self.arduino.disconnect()
+        if self.detection_worker:
+            self.detection_worker.stop()
