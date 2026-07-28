@@ -16,8 +16,8 @@ from assets.transform.coordinates import pixel_distance
 # private/ is .gitignored - these imports fail gracefully if it's missing,
 # so the app still runs (RGB webcam mode) on a machine without it
 try:
-    from private.nozzle_targeting import NozzleTargeting
-    from private import nozzle_overlay
+    from my_version.nozzle_targeting import NozzleTargeting
+    from my_version import nozzle_overlay
     PRIVATE_MODULE_AVAILABLE = True
 except ImportError:
     NozzleTargeting = None

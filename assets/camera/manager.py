@@ -13,7 +13,7 @@ from .webcam import WebcamSource
 # private/ is .gitignored - fails gracefully so the camera picker just
 # won't offer RealSense on a machine that doesn't have it
 try:
-    from private.realsense_camera import RealSenseSource, REALSENSE_AVAILABLE
+    from my_version.realsense_camera import RealSenseSource, REALSENSE_AVAILABLE
 except ImportError:
     RealSenseSource = None
     REALSENSE_AVAILABLE = False
