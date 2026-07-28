@@ -10,6 +10,6 @@ __pycache__/
 
 # Private local files
 /private-drafts/
-/assets/camera/realsense.py
 .claude/
 /assets/assets/
+/my-version/
