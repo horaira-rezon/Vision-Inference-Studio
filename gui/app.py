@@ -11,7 +11,18 @@ from assets.detection.yolo_engine import YoloEngine
 from assets.communication.serial_com import ArduinoLink, SERIAL_AVAILABLE
 from assets.recording.recorder import Recorder
 from assets.visualization import overlay
-from assets.transform.coordinates import pixel_distance, point_to_angle_and_distance
+from assets.transform.coordinates import pixel_distance
+
+# private/ is .gitignored - these imports fail gracefully if it's missing,
+# so the app still runs (RGB webcam mode) on a machine without it
+try:
+    from private.nozzle_targeting import NozzleTargeting
+    from private import nozzle_overlay
+    PRIVATE_MODULE_AVAILABLE = True
+except ImportError:
+    NozzleTargeting = None
+    nozzle_overlay = None
+    PRIVATE_MODULE_AVAILABLE = False
 
 # background color for the small persistent state dots (Camera/Model/Arduino)
 DOT_COLORS = {
@@ -44,6 +55,7 @@ class MainApp(ctk.CTkFrame):
         self.model_locked = False
 
         self.arduino = None
+        self.nozzle = NozzleTargeting() if PRIVATE_MODULE_AVAILABLE else None
         self.recorder = Recorder()
         self.current_frame = None
 
@@ -273,8 +285,6 @@ class MainApp(ctk.CTkFrame):
             self.arduino = ArduinoLink(
                 port=self.settings.get("arduino_port"),
                 baud=self.settings.get("arduino_baud"),
-                steps_per_degree=self.settings.get("steps_per_degree"),
-                command_delay=self.settings.get("command_delay"),
             )
             try:
                 self.arduino.connect()
@@ -370,7 +380,7 @@ class MainApp(ctk.CTkFrame):
             overlay.draw_axes(image, cx, cy)
 
             if self.model is not None:
-                self._draw_detections(image, depth_frame)
+                self._draw_detections(image, depth_frame, cx, cy)
             else:
                 self._draw_click_mode(image, depth_frame, cx, cy)
 
@@ -416,45 +426,42 @@ class MainApp(ctk.CTkFrame):
             mx, my = cx, cy
 
         if self.camera_source.has_depth and depth_frame is not None:
-            point = self.camera_source.deproject(mx, my, depth_frame)
-            if point is not None:
-                diag, angle = point_to_angle_and_distance(point)
-                direction = "Right" if angle > 0 else "Left" if angle < 0 else "Center"
-
-                if self.arduino and self.arduino.is_connected:
-                    self.arduino.send_target_angle(angle)
-
-                overlay.draw_click_marker(image, cx, cy, mx, my)
-                lines = [
-                    (f"Diag Dist: {diag:.3f} m", (0, 255, 0)),
-                    (f"Target Ang: {angle:.1f} deg ({direction})", (0, 255, 0)),
-                ]
-                if self.arduino and self.arduino.is_connected:
-                    lines.append((f"Nozzle At: {self.arduino.current_angle:.1f} deg", (0, 255, 0)))
-                overlay.draw_text_lines(image, lines)
+            if PRIVATE_MODULE_AVAILABLE:
+                arduino_conn = self.arduino.connection if (self.arduino and self.arduino.is_connected) else None
+                nozzle_overlay.render(image, self.camera_source, depth_frame, cx, cy, mx, my,
+                                       self.nozzle, arduino_conn)
             else:
                 overlay.draw_click_marker(image, cx, cy, mx, my, color=(0, 0, 255))
-                cv2.putText(image, "No Depth Data", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                cv2.putText(image, "Depth targeting module not available", (20, 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
         else:
+            # Plain RGB webcam, no model: pixel distance only
             dist = pixel_distance(cx, cy, mx, my)
             overlay.draw_click_marker(image, cx, cy, mx, my)
             overlay.draw_text_lines(image, [(f"Pixel Dist: {dist:.1f} px", (0, 255, 0))])
 
-    def _draw_detections(self, image, depth_frame):
+    def _draw_detections(self, image, depth_frame, cx, cy):
         detections = self.model.detect(image)
-        for det in detections:
+        for i, det in enumerate(detections):
             x1, y1, x2, y2 = det["box"]
             overlay.draw_detection_box(image, det["box"], det["label"], det["conf"])
             obj_cx, obj_cy = (x1 + x2) // 2, (y1 + y2) // 2
+            cv2.circle(image, (obj_cx, obj_cy), 4, (0, 0, 255), -1)  # centroid dot, every detection
+
+            if i != 0:
+                continue  # only the primary (first) detection drives the line/text/nozzle
 
             if self.camera_source.has_depth and depth_frame is not None:
-                point = self.camera_source.deproject(obj_cx, obj_cy, depth_frame)
-                if point is not None:
-                    _, angle = point_to_angle_and_distance(point)
-                    if self.arduino and self.arduino.is_connected:
-                        self.arduino.send_target_angle(angle)
-                        cv2.putText(image, f"{angle:.1f} deg", (x1, y2 + 16),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                if PRIVATE_MODULE_AVAILABLE:
+                    arduino_conn = self.arduino.connection if (self.arduino and self.arduino.is_connected) else None
+                    nozzle_overlay.render(image, self.camera_source, depth_frame, cx, cy, obj_cx, obj_cy,
+                                           self.nozzle, arduino_conn)
+                else:
+                    overlay.draw_click_marker(image, cx, cy, obj_cx, obj_cy, color=(0, 0, 255))
+            else:
+                dist = pixel_distance(cx, cy, obj_cx, obj_cy)
+                overlay.draw_click_marker(image, cx, cy, obj_cx, obj_cy)
+                overlay.draw_text_lines(image, [(f"Pixel Dist: {dist:.1f} px", (0, 255, 0))])
 
     # ------------------------------------------------------------ close
     def on_close(self):

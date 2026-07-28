@@ -1,22 +1,22 @@
 """
 Camera Manager: finds what's actually plugged in, and builds the right
-CameraSource for whatever the user picks.
-
-Fixes from your terminal error:
-  1. Scanning runs on a background thread (scan_async), so the Tkinter
-     window no longer freezes while OpenCV probes each index.
-  2. cv2.CAP_V4L2 is passed explicitly, skipping OpenCV's slower multi-
-     backend fallback attempts (this is most of the noisy output you saw).
-  3. Nodes that open but report zero frame width (like the metadata-only
-     /dev/video1 companion node many webcams expose) are filtered out,
-     since they aren't real capture streams.
+CameraSource for whatever the user picks. Camera selection behavior is
+unchanged - only WHERE RealSenseSource's implementation lives changed
+(private.realsense_camera instead of a public assets/camera/realsense.py).
 """
 
 import threading
 import cv2
 
 from .webcam import WebcamSource
-from .realsense import RealSenseSource, REALSENSE_AVAILABLE
+
+# private/ is .gitignored - fails gracefully so the camera picker just
+# won't offer RealSense on a machine that doesn't have it
+try:
+    from private.realsense_camera import RealSenseSource, REALSENSE_AVAILABLE
+except ImportError:
+    RealSenseSource = None
+    REALSENSE_AVAILABLE = False
 
 try:
     import pyrealsense2 as rs
