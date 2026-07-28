@@ -16,12 +16,12 @@ from assets.transform.coordinates import pixel_distance
 # private/ is .gitignored - these imports fail gracefully if it's missing,
 # so the app still runs (RGB webcam mode) on a machine without it
 try:
-    from my_version.nozzle_targeting import NozzleTargeting
-    from my_version import nozzle_overlay
+    from private.nozzle_targeting import NozzleTargeting
+    from private.nozzle_bridge import compute_target
     PRIVATE_MODULE_AVAILABLE = True
 except ImportError:
     NozzleTargeting = None
-    nozzle_overlay = None
+    compute_target = None
     PRIVATE_MODULE_AVAILABLE = False
 
 # background color for the small persistent state dots (Camera/Model/Arduino)
@@ -375,19 +375,26 @@ class MainApp(ctk.CTkFrame):
         if self.camera_source is None:
             return
 
-        image, depth_frame, cx, cy = self.camera_source.read()
-        if image is not None:
-            overlay.draw_axes(image, cx, cy)
+        raw_image, depth_frame, cx, cy = self.camera_source.read()
+        if raw_image is not None:
+            # Compute everything ONCE - detection inference, nozzle math,
+            # and any Arduino send all happen exactly one time per frame,
+            # regardless of how many times the result gets drawn below.
+            plan = self._build_render_plan(raw_image, depth_frame, cx, cy)
 
-            if self.model is not None:
-                self._draw_detections(image, depth_frame, cx, cy)
-            else:
-                self._draw_click_mode(image, depth_frame, cx, cy)
+            # Native-resolution pass: what gets recorded/screenshotted -
+            # unchanged from before, same resolution as the raw camera feed.
+            record_image = raw_image.copy()
+            self._apply_render_plan(record_image, plan, scale=1.0)
+            self.current_frame = record_image
+            self.recorder.write_frame(record_image)
 
-            self.current_frame = image
-            self.recorder.write_frame(image)
-
-            display_image = self._scale_to_panel(image)
+            # Display pass: resize the CLEAN raw frame first, then draw the
+            # same plan directly at that resolution (scaled coordinates,
+            # thicker lines, bigger text) instead of upscaling an already-
+            # rasterized overlay - this is what keeps text/lines crisp.
+            display_image, scale = self._scale_raw_to_panel(raw_image)
+            self._apply_render_plan(display_image, plan, scale=scale)
 
             rgb = cv2.cvtColor(display_image, cv2.COLOR_BGR2RGB)
             imgtk = ImageTk.PhotoImage(image=Image.fromarray(rgb))
@@ -396,72 +403,115 @@ class MainApp(ctk.CTkFrame):
 
         self.after(15, self.update_frame)
 
-    def _scale_to_panel(self, image):
-        """Resizes the frame using the SAME margins/gap reserved in
-        _build_video_area, so the video is noticeably smaller than the full
-        panel by default while keeping aspect ratio exact (single uniform
-        scale factor - never stretched). current_frame/recorder always keep
-        the un-scaled, full-resolution image; only the on-screen display is
-        affected."""
+    def _scale_raw_to_panel(self, image):
+        """Resizes a CLEAN (no overlay) frame using the margins/gap from
+        _build_video_area, and returns (resized_image, scale_used). Pure
+        resize - no drawing happens here."""
         panel_w = self.video_frame.winfo_width() - (self.SIDE_MARGIN * 2)
         panel_h = self.video_frame.winfo_height() - self.TOP_MARGIN - self.BOTTOM_GAP
         img_h, img_w = image.shape[:2]
 
         if panel_w < 10 or panel_h < 10:
             self.display_scale = 1.0
-            return image
+            return image.copy(), 1.0
 
         fit_scale = min(panel_w / img_w, panel_h / img_h)
         scale = max(fit_scale * self.SIZE_SHRINK, 0.01)
         self.display_scale = scale
 
         new_w, new_h = int(img_w * scale), int(img_h * scale)
-        return cv2.resize(image, (new_w, new_h))
+        return cv2.resize(image, (new_w, new_h)), scale
 
-    def _draw_click_mode(self, image, depth_frame, cx, cy):
-        # Use center as mouse point until first click
-        if self.mouse_clicked:
-            mx, my = self.mouse_x, self.mouse_y
+    def _build_render_plan(self, image, depth_frame, cx, cy):
+        """Runs detection (if a model is loaded) and the nozzle-targeting
+        math/Arduino send EXACTLY ONCE, and returns a plain-data description
+        of what needs to be drawn. All coordinates here are in the RAW
+        camera's native resolution - _apply_render_plan scales them for
+        whichever image it's drawing onto."""
+        plan = {
+            "center": (cx, cy),
+            "boxes": [],        # (x1, y1, x2, y2, label, conf) - every detection
+            "centroids": [],    # (cx, cy) - every detection's centroid
+            "primary_target": None,
+            "target_style": None,   # "ok" | "error" | "unavailable" | None
+            "text_lines": [],
+        }
+
+        if self.model is not None:
+            detections = self.model.detect(image)
+            for i, det in enumerate(detections):
+                x1, y1, x2, y2 = det["box"]
+                plan["boxes"].append((x1, y1, x2, y2, det["label"], det["conf"]))
+                ocx, ocy = (x1 + x2) // 2, (y1 + y2) // 2
+                plan["centroids"].append((ocx, ocy))
+                if i == 0:
+                    plan["primary_target"] = (ocx, ocy)  # first detection drives line/text/nozzle
         else:
-            mx, my = cx, cy
+            if self.mouse_clicked:
+                mx, my = self.mouse_x, self.mouse_y
+            else:
+                mx, my = cx, cy
+            plan["primary_target"] = (mx, my)
+
+        if plan["primary_target"] is None:
+            return plan  # e.g. model loaded but nothing detected this frame
+
+        tx, ty = plan["primary_target"]
 
         if self.camera_source.has_depth and depth_frame is not None:
             if PRIVATE_MODULE_AVAILABLE:
                 arduino_conn = self.arduino.connection if (self.arduino and self.arduino.is_connected) else None
-                nozzle_overlay.render(image, self.camera_source, depth_frame, cx, cy, mx, my,
-                                       self.nozzle, arduino_conn)
-            else:
-                overlay.draw_click_marker(image, cx, cy, mx, my, color=(0, 0, 255))
-                cv2.putText(image, "Depth targeting module not available", (20, 40),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-        else:
-            # Plain RGB webcam, no model: pixel distance only
-            dist = pixel_distance(cx, cy, mx, my)
-            overlay.draw_click_marker(image, cx, cy, mx, my)
-            overlay.draw_text_lines(image, [(f"Pixel Dist: {dist:.1f} px", (0, 255, 0))])
-
-    def _draw_detections(self, image, depth_frame, cx, cy):
-        detections = self.model.detect(image)
-        for i, det in enumerate(detections):
-            x1, y1, x2, y2 = det["box"]
-            overlay.draw_detection_box(image, det["box"], det["label"], det["conf"])
-            obj_cx, obj_cy = (x1 + x2) // 2, (y1 + y2) // 2
-            cv2.circle(image, (obj_cx, obj_cy), 4, (0, 0, 255), -1)  # centroid dot, every detection
-
-            if i != 0:
-                continue  # only the primary (first) detection drives the line/text/nozzle
-
-            if self.camera_source.has_depth and depth_frame is not None:
-                if PRIVATE_MODULE_AVAILABLE:
-                    arduino_conn = self.arduino.connection if (self.arduino and self.arduino.is_connected) else None
-                    nozzle_overlay.render(image, self.camera_source, depth_frame, cx, cy, obj_cx, obj_cy,
-                                           self.nozzle, arduino_conn)
+                result = compute_target(self.camera_source, depth_frame, tx, ty, self.nozzle, arduino_conn)
+                if result is None:
+                    plan["target_style"] = "error"
                 else:
-                    overlay.draw_click_marker(image, cx, cy, obj_cx, obj_cy, color=(0, 0, 255))
+                    plan["target_style"] = "ok"
+                    plan["text_lines"] = [
+                        (f"Diag Dist: {result['diag']:.3f} m", (0, 255, 0)),
+                        (f"Target Ang: {result['angle']:.1f} deg ({result['direction']})", (0, 255, 0)),
+                        (f"Steps to Move: {result['steps']}", (0, 255, 0)),
+                        (f"Nozzle At: {result['nozzle_angle']:.1f} deg", (0, 255, 0)),
+                    ]
             else:
-                dist = pixel_distance(cx, cy, obj_cx, obj_cy)
-                overlay.draw_click_marker(image, cx, cy, obj_cx, obj_cy)
-                overlay.draw_text_lines(image, [(f"Pixel Dist: {dist:.1f} px", (0, 255, 0))])
+                plan["target_style"] = "unavailable"
+        else:
+            dist = pixel_distance(cx, cy, tx, ty)
+            plan["target_style"] = "ok"
+            plan["text_lines"] = [(f"Pixel Dist: {dist:.1f} px", (0, 255, 0))]
+
+        return plan
+
+    def _apply_render_plan(self, image, plan, scale=1.0):
+        """Pure drawing - safe to call more than once per frame with the
+        SAME plan (no side effects), at any resolution/scale."""
+        cx, cy = plan["center"]
+        s_cx, s_cy = int(cx * scale), int(cy * scale)
+        overlay.draw_axes(image, s_cx, s_cy, thickness=max(1, round(scale)))
+
+        for (x1, y1, x2, y2, label, conf) in plan["boxes"]:
+            sbox = (int(x1 * scale), int(y1 * scale), int(x2 * scale), int(y2 * scale))
+            overlay.draw_detection_box(image, sbox, label, conf, scale=scale)
+
+        for (ocx, ocy) in plan["centroids"]:
+            overlay.draw_centroid_marker(image, int(ocx * scale), int(ocy * scale), scale=scale)
+
+        if plan["target_style"] is None:
+            return
+
+        tx, ty = plan["primary_target"]
+        s_tx, s_ty = int(tx * scale), int(ty * scale)
+
+        if plan["target_style"] == "error":
+            overlay.draw_click_marker(image, s_cx, s_cy, s_tx, s_ty, color=(0, 0, 255), scale=scale)
+            cv2.putText(image, "No Depth Data", (int(20 * scale), int(40 * scale)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6 * scale, (0, 0, 255), max(1, round(2 * scale)), cv2.LINE_AA)
+        elif plan["target_style"] == "unavailable":
+            overlay.draw_click_marker(image, s_cx, s_cy, s_tx, s_ty, color=(0, 0, 255), scale=scale)
+            cv2.putText(image, "Depth targeting module not available", (int(20 * scale), int(40 * scale)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5 * scale, (0, 0, 255), max(1, round(2 * scale)), cv2.LINE_AA)
+        else:  # "ok"
+            overlay.draw_click_marker(image, s_cx, s_cy, s_tx, s_ty, scale=scale)
+            overlay.draw_text_lines(image, plan["text_lines"], scale=scale)
 
     # ------------------------------------------------------------ close
     def on_close(self):
