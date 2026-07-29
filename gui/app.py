@@ -14,6 +14,7 @@ from assets.recording.recorder import Recorder
 from assets.visualization import overlay
 from assets.transform.coordinates import pixel_distance
 from assets.ui.file_dialogs import choose_file, choose_directory
+from gui.config_window import ConfigWindow
 
 # private/ is .gitignored - these imports fail gracefully if it's missing,
 # so the app still runs (RGB webcam mode) on a machine without it
@@ -60,6 +61,9 @@ class MainApp(ctk.CTkFrame):
         self.nozzle = NozzleTargeting() if PRIVATE_MODULE_AVAILABLE else None
         self.recorder = Recorder()
         self.current_frame = None
+        self._raw_frame = None      # clean frame (no overlay), refreshed every loop
+        self._last_plan = None      # render plan for the same frame, for on-demand overlay variants
+        self.config_window = None
 
         self.mouse_x, self.mouse_y = 0, 0
         self.mouse_clicked = False  # True after first click in click mode
@@ -144,6 +148,24 @@ class MainApp(ctk.CTkFrame):
             fg_color="#059669", hover_color="#047857",
         )
         self.screenshot_btn.pack(fill="x", padx=16, pady=(0, 2))
+
+        self.screenshot_clean_btn = ctk.CTkButton(
+            sidebar, text="Screenshot (No Overlay)", command=self.take_screenshot_clean,
+            fg_color="transparent", border_width=1, border_color="gray40",
+        )
+        self.screenshot_clean_btn.pack(fill="x", padx=16, pady=(0, 2))
+
+        self.screenshot_boxes_btn = ctk.CTkButton(
+            sidebar, text="Screenshot (Boxes/Clicks Only)", command=self.take_screenshot_boxes_only,
+            fg_color="transparent", border_width=1, border_color="gray40",
+        )
+        self.screenshot_boxes_btn.pack(fill="x", padx=16, pady=(0, 14))
+
+        self.config_btn = ctk.CTkButton(
+            sidebar, text="Configuration", command=self.open_configuration,
+            fg_color="#374151", hover_color="#4b5563",
+        )
+        self.config_btn.pack(fill="x", padx=16, pady=(0, 2))
 
     def _section_label(self, parent, text):
         ctk.CTkLabel(
@@ -294,6 +316,16 @@ class MainApp(ctk.CTkFrame):
         self._show_notice("Click mode enabled (no detection)", "warn")
         self.mouse_clicked = False  # reset click flag when entering click mode
 
+    # --------------------------------------------------------- configuration
+    def open_configuration(self):
+        if self.config_window is not None and self.config_window.winfo_exists():
+            self.config_window.lift()
+            self.config_window.focus_force()
+            return
+        self.config_window = ConfigWindow(
+            self.master, self.settings, has_model_fn=lambda: self.model is not None
+        )
+
 
     # --------------------------------------------------- arduino (toggle)
     def toggle_arduino(self):
@@ -373,12 +405,29 @@ class MainApp(ctk.CTkFrame):
         self._recording_after_id = self.after(1000, self._update_recording_notice)
 
     def take_screenshot(self):
+        """Full overlay - exactly what's on screen / recorded to video."""
+        self._save_screenshot(self.current_frame)
+
+    def take_screenshot_clean(self):
+        """No UI elements at all - the raw camera frame."""
+        self._save_screenshot(self._raw_frame)
+
+    def take_screenshot_boxes_only(self):
+        """Detection boxes + labels (or the click dot, in click-mode) -
+        no crosshair, no diagonal line, no text overlay."""
+        if self._raw_frame is None or self._last_plan is None:
+            return
+        frame = self._raw_frame.copy()
+        self._apply_render_plan(frame, self._last_plan, scale=1.0, mode="boxes_only")
+        self._save_screenshot(frame)
+
+    def _save_screenshot(self, frame):
         screenshot_dir = self.settings.get("screenshot_output_dir")
         if not screenshot_dir:
             self._show_notice("Select a screenshot folder first", "error")
             return
-        if self.current_frame is not None:
-            path = self.recorder.save_screenshot(self.current_frame, screenshot_dir)
+        if frame is not None:
+            path = self.recorder.save_screenshot(frame, screenshot_dir)
             self._show_notice(f"Screenshot saved: {path.split('/')[-1]}", "ok")
 
     # ----------------------------------------------------------- mouse
@@ -400,6 +449,8 @@ class MainApp(ctk.CTkFrame):
             # and any Arduino send all happen exactly one time per frame,
             # regardless of how many times the result gets drawn below.
             plan = self._build_render_plan(raw_image, depth_frame, cx, cy)
+            self._raw_frame = raw_image.copy()   # clean, no overlay - for screenshot variants
+            self._last_plan = plan
 
             # Native-resolution pass: what gets recorded/screenshotted -
             # unchanged from before, same resolution as the raw camera feed.
@@ -441,6 +492,28 @@ class MainApp(ctk.CTkFrame):
         new_w, new_h = int(img_w * scale), int(img_h * scale)
         return cv2.resize(image, (new_w, new_h)), scale
 
+    def _compute_axis_y(self, cy, h):
+        """Row the horizontal crosshair line should be drawn on, in the
+        RAW camera's native resolution. Only "External Actuation" mode
+        lets the X-Axis slider move it; every other mode keeps it pinned
+        to the true center row (cy), same as before this feature existed."""
+        if self.settings.get("actuation_mode") != "external":
+            return cy
+
+        slider = self.settings.get("x_axis_slider")
+        if slider is None:
+            slider = 0.5
+
+        # t: -1 (full left) .. +1 (full right). Right moves the line UP
+        # toward row 0; left moves it DOWN toward the bottom edge. The
+        # true center (cx, cy) itself never moves - only this row does.
+        t = (slider - 0.5) * 2
+        if t >= 0:
+            axis_y = cy - t * cy
+        else:
+            axis_y = cy + (-t) * (h - 1 - cy)
+        return int(round(axis_y))
+
     def _build_render_plan(self, image, depth_frame, cx, cy):
         """Runs detection (if a model is loaded) and the nozzle-targeting
         math/Arduino send EXACTLY ONCE, and returns a plain-data description
@@ -449,6 +522,7 @@ class MainApp(ctk.CTkFrame):
         whichever image it's drawing onto."""
         plan = {
             "center": (cx, cy),
+            "axis_y": self._compute_axis_y(cy, image.shape[0]),
             "boxes": [],        # (x1, y1, x2, y2, label, conf) - every detection
             "centroids": [],    # (cx, cy) - every detection's centroid
             "primary_target": None,
@@ -505,40 +579,95 @@ class MainApp(ctk.CTkFrame):
 
         return plan
 
-    def _apply_render_plan(self, image, plan, scale=1.0):
+    def _draw_target_lines(self, image, plan, s_cx, s_axis_y, s_tx, s_ty, scale, color=None):
+        """Draws one diagonal line (in the existing style) per detected
+        box, pointing at that box's own centroid - not just at the first
+        detection's. Falls back to a single line to the click/primary
+        target when there are no boxes at all (click-mode)."""
+        if plan["boxes"]:
+            for box, centroid in zip(plan["boxes"], plan["centroids"]):
+                x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
+                sbox = (int(x1 * scale), int(y1 * scale), int(x2 * scale), int(y2 * scale))
+                ocx, ocy = centroid
+                s_ocx, s_ocy = int(ocx * scale), int(ocy * scale)
+                overlay.draw_click_marker(image, s_cx, s_axis_y, s_ocx, s_ocy, box=sbox, color=color, scale=scale)
+        else:
+            overlay.draw_click_marker(image, s_cx, s_axis_y, s_tx, s_ty, color=color, scale=scale)
+
+    def _apply_render_plan(self, image, plan, scale=1.0, mode="full"):
         """Pure drawing - safe to call more than once per frame with the
-        SAME plan (no side effects), at any resolution/scale."""
+        SAME plan (no side effects), at any resolution/scale.
+
+        `mode` controls which layers get drawn:
+          - "full": everything, gated by the Diagonal Distance setting -
+            this is what's shown on screen and recorded to video.
+          - "boxes_only": detection boxes/labels (or the click dot, in
+            click-mode) and nothing else - no crosshair, no diagonal
+            line, no text - for the "Screenshot (Boxes/Clicks Only)" button.
+        """
         cx, cy = plan["center"]
         s_cx, s_cy = int(cx * scale), int(cy * scale)
-        overlay.draw_axes(image, s_cx, s_cy, thickness=max(1, round(scale)))
+        axis_y = plan.get("axis_y", cy)
+        s_axis_y = int(axis_y * scale)
 
-        for (x1, y1, x2, y2, label, conf) in plan["boxes"]:
-            sbox = (int(x1 * scale), int(y1 * scale), int(x2 * scale), int(y2 * scale))
-            overlay.draw_detection_box(image, sbox, label, conf, scale=scale)
+        if mode == "boxes_only":
+            if plan["boxes"]:
+                for (x1, y1, x2, y2, label, conf) in plan["boxes"]:
+                    sbox = (int(x1 * scale), int(y1 * scale), int(x2 * scale), int(y2 * scale))
+                    overlay.draw_detection_box(image, sbox, label, conf, scale=scale)
+                for (ocx, ocy) in plan["centroids"]:
+                    overlay.draw_centroid_marker(image, int(ocx * scale), int(ocy * scale), scale=scale)
+            elif plan["primary_target"] is not None:
+                tx, ty = plan["primary_target"]
+                overlay.draw_centroid_marker(image, int(tx * scale), int(ty * scale), scale=scale)
+            return
 
-        for (ocx, ocy) in plan["centroids"]:
-            overlay.draw_centroid_marker(image, int(ocx * scale), int(ocy * scale), scale=scale)
+        overlay.draw_axes(image, s_cx, s_axis_y, thickness=max(1, round(scale)))
+        if s_axis_y != s_cy:
+            # X-Axis slider has shifted the crosshair - show where the
+            # true, unmoved center still is, in a distinct color
+            overlay.draw_fixed_center_marker(image, s_cx, s_cy, scale=scale)
 
         if plan["target_style"] is None:
             return
+
+        diagonal_on = bool(self.settings.get("diagonal_distance_on"))
 
         tx, ty = plan["primary_target"]
         s_tx, s_ty = int(tx * scale), int(ty * scale)
 
         if plan["target_style"] == "error":
-            overlay.draw_click_marker(image, s_cx, s_cy, s_tx, s_ty, color=(0, 0, 255), scale=scale)
-            cv2.putText(image, "No Depth Data", (int(20 * scale), int(40 * scale)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6 * scale, (0, 0, 255), max(1, round(2 * scale)), cv2.LINE_AA)
+            if diagonal_on:
+                self._draw_target_lines(image, plan, s_cx, s_axis_y, s_tx, s_ty, scale, color=(0, 0, 255))
+                cv2.putText(image, "No Depth Data", (int(20 * scale), int(40 * scale)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6 * scale, (0, 0, 255), max(1, round(2 * scale)), cv2.LINE_AA)
         elif plan["target_style"] == "unavailable":
-            overlay.draw_click_marker(image, s_cx, s_cy, s_tx, s_ty, color=(0, 0, 255), scale=scale)
-            cv2.putText(image, "Depth targeting module not available", (int(20 * scale), int(40 * scale)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5 * scale, (0, 0, 255), max(1, round(2 * scale)), cv2.LINE_AA)
+            if diagonal_on:
+                self._draw_target_lines(image, plan, s_cx, s_axis_y, s_tx, s_ty, scale, color=(0, 0, 255))
+                cv2.putText(image, "Depth targeting module not available", (int(20 * scale), int(40 * scale)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5 * scale, (0, 0, 255), max(1, round(2 * scale)), cv2.LINE_AA)
         else:  # "ok"
-            overlay.draw_click_marker(image, s_cx, s_cy, s_tx, s_ty, scale=scale)
-            overlay.draw_text_lines(image, plan["text_lines"], scale=scale)
+            if diagonal_on:
+                self._draw_target_lines(image, plan, s_cx, s_axis_y, s_tx, s_ty, scale)
+            elif not plan["boxes"]:
+                # no line, but still show the click point itself (a
+                # detection's own centroid dot is drawn below regardless)
+                overlay.draw_centroid_marker(image, s_tx, s_ty, scale=scale)
+
+            for (x1, y1, x2, y2, label, conf) in plan["boxes"]:
+                sbox = (int(x1 * scale), int(y1 * scale), int(x2 * scale), int(y2 * scale))
+                overlay.draw_detection_box(image, sbox, label, conf, scale=scale)
+
+            for (ocx, ocy) in plan["centroids"]:
+                overlay.draw_centroid_marker(image, int(ocx * scale), int(ocy * scale), scale=scale)
+
+            if diagonal_on:
+                overlay.draw_text_lines(image, plan["text_lines"], scale=scale)
 
     # ------------------------------------------------------------ close
     def on_close(self):
+        if self.config_window is not None and self.config_window.winfo_exists():
+            self.config_window.destroy()
         self.recorder.stop_recording()
         if self.camera_source:
             self.camera_source.stop()

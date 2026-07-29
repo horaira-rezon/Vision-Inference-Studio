@@ -17,6 +17,21 @@ DEFAULT_SETTINGS = {
     "arduino_baud": 115200,
     "steps_per_degree": 400.0 / 360.0,   # NEMA17 @ 400 steps/rev
     "command_delay": 0.1,
+
+    # --- Configuration window (gui/config_window.py) ---
+    # "none" | "external" | "diagonal_only" - None until the user picks one
+    "actuation_mode": None,
+    # whether the diagonal line + its overlay text (pixel/real-world dist,
+    # nozzle angle, steps, etc.) are drawn at all
+    "diagonal_distance_on": False,
+    # 0.0..1.0, 0.5 = centered/no shift. Only applied when actuation_mode
+    # is "external" - moves the horizontal crosshair line (and therefore
+    # where the diagonal line/its cyan dot originate) up or down without
+    # moving the true camera-center dot or any real-world calculation.
+    "x_axis_slider": 0.5,
+    # Multiple Box Distance Merge - scaffold only for now (see config_window.py)
+    "multi_box_count": 1,
+    "multi_box_quadrants": {},
 }
 
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "..", "assets", "settings.json")
