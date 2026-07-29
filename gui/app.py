@@ -79,25 +79,31 @@ class MainApp(ctk.CTkFrame):
 
     # ------------------------------------------------------------ sidebar
     def _build_sidebar(self):
-        sidebar = ctk.CTkScrollableFrame(self, width=260, corner_radius=0, fg_color="#1a1d23")
-        sidebar.grid(row=0, column=0, sticky="nsw")
+        sidebar_container = ctk.CTkFrame(self, width=260, corner_radius=0, fg_color="#1a1d23")
+        sidebar_container.grid(row=0, column=0, sticky="nsw")
+        sidebar_container.grid_propagate(False)
+        sidebar_container.grid_rowconfigure(0, weight=1)
+        sidebar_container.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(sidebar, text="Setup", font=ctk.CTkFont(size=18, weight="bold")).pack(
+        sidebar = ctk.CTkScrollableFrame(sidebar_container, corner_radius=0, fg_color="#1a1d23")
+        sidebar.grid(row=0, column=0, sticky="nsew")
+
+        ctk.CTkLabel(sidebar, text="Setup", font=ctk.CTkFont(size=20, weight="bold")).pack(
             anchor="w", padx=16, pady=(16, 12)
         )
 
         # --- Camera ---
         self.camera_dot = self._section_label_with_dot(sidebar, "1. Camera")
-        self.camera_btn = ctk.CTkButton(sidebar, text="Select Camera", command=self.select_camera)
+        self.camera_btn = ctk.CTkButton(sidebar, text="Select Camera", command=self.select_camera, font=ctk.CTkFont(size=14))
         self.camera_btn.pack(fill="x", padx=16, pady=(4, 2))
 
         # --- Model ---
         self.model_dot = self._section_label_with_dot(sidebar, "2. Detection Model")
-        self.model_btn = ctk.CTkButton(sidebar, text="Select Model Weight (.pt)", command=self.select_model)
+        self.model_btn = ctk.CTkButton(sidebar, text="Select Model Weight (.pt)", command=self.select_model, font=ctk.CTkFont(size=14))
         self.model_btn.pack(fill="x", padx=16, pady=(4, 2))
         self.skip_model_btn = ctk.CTkButton(
             sidebar, text="Skip Model (Click Mode)", command=self.skip_model,
-            fg_color="#6b7280", hover_color="#4b5563",
+            fg_color="#5e6471", hover_color="#4b5563", font=ctk.CTkFont(size=14)
         )
         self.skip_model_btn.pack(fill="x", padx=16, pady=(0, 2))
 
@@ -105,7 +111,7 @@ class MainApp(ctk.CTkFrame):
         self.arduino_dot = self._section_label_with_dot(sidebar, "3. Arduino")
         self.arduino_btn = ctk.CTkButton(
             sidebar, text="Connect Arduino", command=self.toggle_arduino,
-            fg_color="#065f46", hover_color="#047857",
+            fg_color="#065f46", hover_color="#047857", font=ctk.CTkFont(size=14)
         )
         self.arduino_btn.pack(fill="x", padx=16, pady=(4, 2))
 
@@ -114,18 +120,18 @@ class MainApp(ctk.CTkFrame):
 
         self.video_folder_btn = ctk.CTkButton(
             sidebar, text="Select Video Folder", command=self.select_video_folder,
-            fg_color="transparent", border_width=1, border_color="gray40",
+            fg_color="transparent", border_width=1, border_color="gray40", font=ctk.CTkFont(size=14)
         )
         self.video_folder_btn.pack(fill="x", padx=16, pady=(4, 2))
         self.video_folder_label = ctk.CTkLabel(
             sidebar, text=self._short_path(self.settings.get("video_output_dir")) or "No folder selected",
-            font=ctk.CTkFont(size=15), text_color="gray60", anchor="w", justify="left",
+            font=ctk.CTkFont(size=14), text_color="gray60", anchor="w", justify="left",
         )
         self.video_folder_label.pack(anchor="w", padx=16, pady=(0, 8), fill="x")
 
         self.record_btn = ctk.CTkButton(
             sidebar, text="Start Recording", command=self.toggle_recording,
-            fg_color="#7f1d1d", hover_color="#991b1b",
+            fg_color="#7f1d1d", hover_color="#991b1b", font=ctk.CTkFont(size=14)
         )
         self.record_btn.pack(fill="x", padx=16, pady=(0, 14))
 
@@ -133,43 +139,47 @@ class MainApp(ctk.CTkFrame):
         self._section_label(sidebar, "5. Screenshot")
 
         self.screenshot_folder_btn = ctk.CTkButton(
-            sidebar, text="Select Screenshot Folder", command=self.select_screenshot_folder,
-            fg_color="transparent", border_width=1, border_color="gray40",
+            sidebar, text="Select Image Folder", command=self.select_screenshot_folder,
+            fg_color="transparent", border_width=1, border_color="gray40", font=ctk.CTkFont(size=14)
         )
         self.screenshot_folder_btn.pack(fill="x", padx=16, pady=(4, 2))
         self.screenshot_folder_label = ctk.CTkLabel(
             sidebar, text=self._short_path(self.settings.get("screenshot_output_dir")) or "No folder selected",
-            font=ctk.CTkFont(size=15), text_color="gray60", anchor="w", justify="left",
+            font=ctk.CTkFont(size=14), text_color="gray60", anchor="w", justify="left",
         )
         self.screenshot_folder_label.pack(anchor="w", padx=16, pady=(0, 8), fill="x")
 
         self.screenshot_btn = ctk.CTkButton(
-            sidebar, text="Take Screenshot", command=self.take_screenshot,
-            fg_color="#059669", hover_color="#047857",
+            sidebar, text="Window Screenshot", command=self.take_screenshot,
+            fg_color="#065f46", hover_color="#047857", font=ctk.CTkFont(size=14)
         )
         self.screenshot_btn.pack(fill="x", padx=16, pady=(0, 2))
 
         self.screenshot_clean_btn = ctk.CTkButton(
-            sidebar, text="Screenshot (No Overlay)", command=self.take_screenshot_clean,
-            fg_color="transparent", border_width=1, border_color="gray40",
+            sidebar, text="Capture Cam. Frame", command=self.take_screenshot_clean,
+            fg_color="#05523c", hover_color="#036247", font=ctk.CTkFont(size=14)
         )
         self.screenshot_clean_btn.pack(fill="x", padx=16, pady=(0, 2))
 
         self.screenshot_boxes_btn = ctk.CTkButton(
-            sidebar, text="Screenshot (Boxes/Clicks Only)", command=self.take_screenshot_boxes_only,
-            fg_color="transparent", border_width=1, border_color="gray40",
+            sidebar, text="Detection UI Window", command=self.take_screenshot_boxes_only,
+            fg_color="#033f2e", hover_color="#02553E", font=ctk.CTkFont(size=14)
         )
         self.screenshot_boxes_btn.pack(fill="x", padx=16, pady=(0, 14))
 
+        # --- Configuration: pinned below the scrollable list (own footer
+        # area, doesn't scroll away with everything else) ---
+        footer = ctk.CTkFrame(sidebar_container, fg_color="#15181d", corner_radius=0)
+        footer.grid(row=1, column=0, sticky="ew")
         self.config_btn = ctk.CTkButton(
-            sidebar, text="Configuration", command=self.open_configuration,
-            fg_color="#374151", hover_color="#4b5563",
+            footer, text="Configuration", command=self.open_configuration,
+            fg_color="#374151", hover_color="#4b5563", font=ctk.CTkFont(size=16)
         )
-        self.config_btn.pack(fill="x", padx=16, pady=(0, 2))
+        self.config_btn.pack(fill="x", padx=16, pady=30)
 
     def _section_label(self, parent, text):
         ctk.CTkLabel(
-            parent, text=text, font=ctk.CTkFont(size=15, weight="bold"), text_color="gray70"
+            parent, text=text, font=ctk.CTkFont(size=17, weight="bold"), text_color="gray70"
         ).pack(anchor="w", padx=16, pady=(16, 2))
 
     def _section_label_with_dot(self, parent, text):
@@ -178,7 +188,7 @@ class MainApp(ctk.CTkFrame):
         container.pack(anchor="w", padx=16, pady=(16, 2))
 
         label = ctk.CTkLabel(
-            container, text=text, font=ctk.CTkFont(size=15, weight="bold"), text_color="gray70"
+            container, text=text, font=ctk.CTkFont(size=17, weight="bold"), text_color="gray70"
         )
         label.pack(side="left")
 

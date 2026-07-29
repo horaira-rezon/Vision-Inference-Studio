@@ -5,6 +5,12 @@ Multiple Box Distance Merge section. Themed to match setup_screen.py's
 card look. Reads/writes straight through the shared Settings instance -
 MainApp's render loop reads those same settings fresh every frame, so
 nothing here needs to push updates back to it directly.
+
+Save/Reset: every toggle/slider/checkbox still applies immediately (so you
+get live preview in the video feed while adjusting things) and is written
+to disk right away via Settings.set(). "Save" is an explicit confirmation
+of that (useful since there's no other feedback that it stuck); "Reset"
+restores all four sections to their default values.
 """
 
 import customtkinter as ctk
@@ -43,6 +49,14 @@ MODE_OPTIONS = [
     ),
 ]
 
+DEFAULTS = {
+    "actuation_mode": "none",
+    "diagonal_distance_on": False,
+    "x_axis_slider": 0.5,
+    "multi_box_count": 1,
+    "axis_quadrants": {},
+}
+
 
 class ConfigWindow(ctk.CTkToplevel):
     def __init__(self, master, settings, has_model_fn=None):
@@ -51,19 +65,21 @@ class ConfigWindow(ctk.CTkToplevel):
         self.has_model_fn = has_model_fn or (lambda: False)
 
         self.title("Configuration")
-        self.geometry("620x720")
+        self.geometry("620x760")
         self.minsize(560, 560)
         self.configure(fg_color=BG)
 
         self._mode_cards = {}
-        self._quadrant_rows = []
-        self._quadrant_vars = {}
+        self._axis_vars = {}
+        self._axis_checkboxes = []
+        self._wrap_labels = []  # (label, side_padding) - kept in sync with window width
         self._poll_after_id = None
 
         self._build_ui()
         self._refresh_from_settings()
 
         self.bind("<Escape>", lambda e: self._close())
+        self.bind("<Configure>", self._update_wraplengths)
         self.protocol("WM_DELETE_WINDOW", self._close)
 
         # keep the multi-box section's enabled/disabled state in sync even
@@ -72,6 +88,7 @@ class ConfigWindow(ctk.CTkToplevel):
         self._poll_gating()
 
         self.after(50, self._focus_and_grab)
+        self.after(60, self._update_wraplengths)  # sane wrap widths before first paint settles
 
     def _focus_and_grab(self):
         self.lift()
@@ -101,13 +118,9 @@ class ConfigWindow(ctk.CTkToplevel):
         ctk.CTkLabel(
             header, text="Configuration", font=ctk.CTkFont(size=26, weight="bold")
         ).pack(side="left")
-
-        close_btn = ctk.CTkButton(
-            header, text="\u2715", width=32, height=32, corner_radius=16,
-            fg_color="transparent", hover_color="#3a1f1f", text_color="gray70",
-            font=ctk.CTkFont(size=16, weight="bold"), command=self._close,
-        )
-        close_btn.pack(side="right")
+        # No custom close ("X") button here on purpose - the OS-provided
+        # title bar close button already closes this window; having both
+        # was a duplicate control.
 
         scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=24, pady=(8, 16))
@@ -132,13 +145,15 @@ class ConfigWindow(ctk.CTkToplevel):
             command=self._on_diag_toggle, progress_color=ACCENT,
         )
         self.diag_switch.pack(anchor="w")
-        ctk.CTkLabel(
+        diag_desc = ctk.CTkLabel(
             diag_inner,
-            text="Draws the line (and its distance / depth / nozzle text) from the\n"
-                 "crosshair intersection to the mouse click or box centroid. Off means\n"
+            text="Draws the line (and its distance / depth / nozzle text) from the "
+                 "crosshair intersection to the mouse click or box centroid. Off means "
                  "no line and no overlay text at all.",
             font=ctk.CTkFont(size=13), text_color=DESC_COLOR, justify="left", anchor="w",
-        ).pack(anchor="w", pady=(6, 0))
+        )
+        diag_desc.pack(anchor="w", pady=(6, 0), fill="x")
+        self._register_wrap_label(diag_desc)
 
         # --- 3. X-Axis line mover ---
         self._section_title(scroll, "3. X-Axis Line Position")
@@ -154,13 +169,17 @@ class ConfigWindow(ctk.CTkToplevel):
             command=self._on_axis_slide, progress_color=ACCENT,
         )
         self.axis_slider.pack(fill="x", pady=(6, 0))
-        ctk.CTkLabel(
+        self._prevent_slider_wheel_hijack(self.axis_slider)
+
+        axis_desc = ctk.CTkLabel(
             axis_inner,
-            text="Moves the horizontal crosshair line up or down without moving the\n"
-                 "true camera center. The diagonal line always follows the moving\n"
+            text="Moves the horizontal crosshair line up or down without moving the "
+                 "true camera center. The diagonal line always follows the moving "
                  "intersection point, not the fixed center.",
             font=ctk.CTkFont(size=13), text_color=DESC_COLOR, justify="left", anchor="w",
-        ).pack(anchor="w", pady=(6, 0))
+        )
+        axis_desc.pack(anchor="w", pady=(6, 0), fill="x")
+        self._register_wrap_label(axis_desc)
 
         # --- 4. Multiple Box Distance Merge (scaffold) ---
         self._section_title(scroll, "4. Multiple Box Distance Merge")
@@ -187,6 +206,7 @@ class ConfigWindow(ctk.CTkToplevel):
             variable=self.box_count_slider_var, command=self._on_count_slide, progress_color=ACCENT,
         )
         self.box_count_slider.pack(side="left", fill="x", expand=True, padx=8)
+        self._prevent_slider_wheel_hijack(self.box_count_slider)
 
         self.box_plus_btn = ctk.CTkButton(count_row, text="+", width=32, command=lambda: self._nudge_count(1))
         self.box_plus_btn.pack(side="left")
@@ -194,22 +214,47 @@ class ConfigWindow(ctk.CTkToplevel):
         self.box_count_label = ctk.CTkLabel(box_inner, text="1 box", font=ctk.CTkFont(size=14, weight="bold"))
         self.box_count_label.pack(anchor="w", pady=(6, 10))
 
-        ctk.CTkLabel(
+        box_desc = ctk.CTkLabel(
             box_inner,
-            text="For each box, optionally restrict its measurement to one Y-axis half\n"
-                 "(and, within that, one X-axis half). Leave both sub-checkboxes off to\n"
-                 "cover the whole half. This section is an early scaffold - the actual\n"
-                 "merge behavior will be built out in a later pass.",
+            text="Sets how many detected boxes are considered together. The axis "
+                 "restriction below applies globally to all of them, not per box. "
+                 "Leave both sub-checkboxes off to cover the whole half. This section "
+                 "is an early scaffold - the actual merge behavior will be built out "
+                 "in a later pass.",
             font=ctk.CTkFont(size=13), text_color=DESC_COLOR, justify="left", anchor="w",
-        ).pack(anchor="w", pady=(0, 8))
+        )
+        box_desc.pack(anchor="w", pady=(0, 10), fill="x")
+        self._register_wrap_label(box_desc)
 
-        self.box_rows_frame = ctk.CTkFrame(box_inner, fg_color="transparent")
-        self.box_rows_frame.pack(fill="x")
-
-    def _section_title(self, parent, text):
+        # Single, global axis configuration - applies to however many boxes
+        # are set above, rather than one set of checkboxes per box.
         ctk.CTkLabel(
-            parent, text=text, font=ctk.CTkFont(size=16, weight="bold"), text_color="gray85"
-        ).pack(anchor="w", pady=(14, 6))
+            box_inner, text="Axis Configuration", font=ctk.CTkFont(size=13, weight="bold")
+        ).pack(anchor="w", pady=(4, 4))
+
+        self._make_axis_group(box_inner, "Positive Y axis", "pos_y")
+        self._make_axis_group(box_inner, "Negative Y axis", "neg_y")
+
+        # --- Save / Reset ---
+        footer = ctk.CTkFrame(scroll, fg_color="transparent")
+        footer.pack(fill="x", pady=(20, 4))
+
+        self.save_btn = ctk.CTkButton(
+            footer, text="Save", command=self._save_configuration,
+            fg_color=ACCENT, hover_color="#1d4ed8",
+        )
+        self.save_btn.pack(side="left", expand=True, fill="x", padx=(0, 6))
+
+        self.reset_btn = ctk.CTkButton(
+            footer, text="Reset", command=self._reset_configuration,
+            fg_color="transparent", border_width=1, border_color="gray40",
+        )
+        self.reset_btn.pack(side="left", expand=True, fill="x", padx=(6, 0))
+
+        self.save_status_label = ctk.CTkLabel(
+            scroll, text="", font=ctk.CTkFont(size=12), text_color="#4ade80"
+        )
+        self.save_status_label.pack(anchor="w", pady=(6, 0))
 
     def _make_mode_card(self, parent, mode_key, title, desc):
         card = ctk.CTkFrame(parent, corner_radius=10, fg_color=CARD_BG, border_width=1, border_color=BORDER)
@@ -221,9 +266,10 @@ class ConfigWindow(ctk.CTkToplevel):
         title_label.pack(anchor="w")
         desc_label = ctk.CTkLabel(
             inner, text=desc, font=ctk.CTkFont(size=13), text_color=DESC_COLOR,
-            justify="left", anchor="w", wraplength=520,
+            justify="left", anchor="w",
         )
-        desc_label.pack(anchor="w", pady=(4, 0))
+        desc_label.pack(anchor="w", pady=(4, 0), fill="x")
+        self._register_wrap_label(desc_label)
 
         def choose(_e=None, k=mode_key):
             self._select_mode(k)
@@ -243,6 +289,82 @@ class ConfigWindow(ctk.CTkToplevel):
         card.bind("<Leave>", on_leave)
 
         return card
+
+    def _make_axis_group(self, parent, group_label, group_key):
+        """Single global set of Y/X restriction checkboxes for group_key
+        ('pos_y' or 'neg_y') - shared across however many boxes are set,
+        not duplicated per box. Packed flush-left in `parent`, same
+        indentation as the section's description text above it."""
+        group = ctk.CTkFrame(parent, fg_color="transparent")
+        group.pack(anchor="w", fill="x", pady=(4, 0))
+
+        saved = self.settings.get("axis_quadrants") or {}
+        group_var = tk.BooleanVar(value=bool(saved.get(group_key, False)))
+        posx_var = tk.BooleanVar(value=bool(saved.get(f"{group_key}_posx", False)))
+        negx_var = tk.BooleanVar(value=bool(saved.get(f"{group_key}_negx", False)))
+        self._axis_vars[group_key] = (group_var, posx_var, negx_var)
+
+        def on_change(*_a, group_key=group_key, gv=group_var, pv=posx_var, nv=negx_var):
+            self._save_axis_quadrant(group_key, gv.get(), pv.get(), nv.get())
+
+        cb = ctk.CTkCheckBox(group, text=group_label, variable=group_var, command=on_change)
+        cb.pack(side="left")
+        cb_posx = ctk.CTkCheckBox(group, text="+X", variable=posx_var, command=on_change, width=20)
+        cb_posx.pack(side="left", padx=(16, 0))
+        cb_negx = ctk.CTkCheckBox(group, text="-X", variable=negx_var, command=on_change, width=20)
+        cb_negx.pack(side="left", padx=(8, 0))
+
+        self._axis_checkboxes.extend([cb, cb_posx, cb_negx])
+
+    def _section_title(self, parent, text):
+        ctk.CTkLabel(
+            parent, text=text, font=ctk.CTkFont(size=16, weight="bold"), text_color="gray85"
+        ).pack(anchor="w", pady=(14, 6))
+
+    # ------------------------------------------------------- wheel safety
+    def _prevent_slider_wheel_hijack(self, slider):
+        """Scrolling the mouse wheel while hovering a slider should scroll
+        the PAGE, not change the slider's value. Binds on both the slider's
+        outer widget and its internal canvas (whichever actually receives
+        the wheel event), forwards the scroll to the page's own scrollable
+        canvas, and blocks further handling so the slider itself never
+        sees the wheel event."""
+
+        def handler(event):
+            delta = 0
+            if getattr(event, "delta", 0):
+                delta = -1 if event.delta > 0 else 1
+            elif getattr(event, "num", None) == 4:
+                delta = -1
+            elif getattr(event, "num", None) == 5:
+                delta = 1
+            try:
+                self.scroll._parent_canvas.yview_scroll(delta, "units")
+            except Exception:
+                pass
+            return "break"
+
+        targets = [slider]
+        inner_canvas = getattr(slider, "_canvas", None)
+        if inner_canvas is not None:
+            targets.append(inner_canvas)
+
+        for widget in targets:
+            widget.bind("<MouseWheel>", handler)  # Windows / macOS
+            widget.bind("<Button-4>", handler)     # Linux scroll up
+            widget.bind("<Button-5>", handler)     # Linux scroll down
+
+    # -------------------------------------------------- dynamic wrapping
+    def _register_wrap_label(self, label, side_padding=100):
+        self._wrap_labels.append((label, side_padding))
+        self._update_wraplengths()
+
+    def _update_wraplengths(self, event=None):
+        width = self.winfo_width()
+        if width <= 1:
+            width = 620  # window not realized yet - fall back to initial geometry
+        for label, side_padding in self._wrap_labels:
+            label.configure(wraplength=max(200, width - side_padding))
 
     # ------------------------------------------------------------ actions
     def _select_mode(self, mode_key):
@@ -267,13 +389,33 @@ class ConfigWindow(ctk.CTkToplevel):
         count = int(round(float(value)))
         self.settings.set("multi_box_count", count)
         self.box_count_label.configure(text=f"{count} box" if count == 1 else f"{count} boxes")
-        self._rebuild_box_rows(count)
 
     def _nudge_count(self, delta):
         count = int(self.settings.get("multi_box_count") or 1)
         count = max(1, min(10, count + delta))
         self.box_count_slider_var.set(count)
         self._on_count_slide(count)
+
+    def _save_axis_quadrant(self, group_key, group_on, posx_on, negx_on):
+        stored = dict(self.settings.get("axis_quadrants") or {})
+        stored[group_key] = bool(group_on)
+        stored[f"{group_key}_posx"] = bool(posx_on)
+        stored[f"{group_key}_negx"] = bool(negx_on)
+        self.settings.set("axis_quadrants", stored)
+
+    def _save_configuration(self):
+        self.settings.save()  # everything already writes through live; this confirms it
+        self._show_save_feedback("Configuration saved")
+
+    def _reset_configuration(self):
+        for key, value in DEFAULTS.items():
+            self.settings.set(key, value)
+        self._refresh_from_settings()
+        self._show_save_feedback("Reset to defaults")
+
+    def _show_save_feedback(self, text):
+        self.save_status_label.configure(text=text)
+        self.after(1800, lambda: self.save_status_label.configure(text=""))
 
     # ------------------------------------------------------------ gating
     def _poll_gating(self):
@@ -324,66 +466,8 @@ class ConfigWindow(ctk.CTkToplevel):
         self.box_minus_btn.configure(state=widget_state)
         self.box_plus_btn.configure(state=widget_state)
         self.box_card.configure(fg_color=CARD_BG if box_enabled else "#12161c")
-        for row in self._quadrant_rows:
-            for cb in row["checkboxes"]:
-                cb.configure(state=widget_state)
-
-    # -------------------------------------------------------- box rows UI
-    def _rebuild_box_rows(self, count):
-        for child in self.box_rows_frame.winfo_children():
-            child.destroy()
-        self._quadrant_rows = []
-
-        stored = self.settings.get("multi_box_quadrants") or {}
-
-        for i in range(1, count + 1):
-            key = str(i)
-            saved = stored.get(key, {})
-
-            row = ctk.CTkFrame(self.box_rows_frame, fg_color="#10151c", corner_radius=8)
-            row.pack(fill="x", pady=4)
-            row_inner = ctk.CTkFrame(row, fg_color="transparent")
-            row_inner.pack(fill="x", padx=12, pady=8)
-
-            ctk.CTkLabel(row_inner, text=f"Box {i}", font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w")
-
-            checkboxes = []
-
-            def make_group(parent, group_label, group_key):
-                group = ctk.CTkFrame(parent, fg_color="transparent")
-                group.pack(fill="x", pady=(4, 0))
-
-                group_var = tk.BooleanVar(value=bool(saved.get(group_key, False)))
-                posx_var = tk.BooleanVar(value=bool(saved.get(f"{group_key}_posx", False)))
-                negx_var = tk.BooleanVar(value=bool(saved.get(f"{group_key}_negx", False)))
-
-                def on_change(*_a, i=i, group_key=group_key, gv=group_var, pv=posx_var, nv=negx_var):
-                    self._save_box_quadrant(i, group_key, gv.get(), pv.get(), nv.get())
-
-                cb = ctk.CTkCheckBox(group, text=group_label, variable=group_var, command=on_change)
-                cb.pack(side="left")
-                cb_posx = ctk.CTkCheckBox(group, text="+X", variable=posx_var, command=on_change, width=20)
-                cb_posx.pack(side="left", padx=(16, 0))
-                cb_negx = ctk.CTkCheckBox(group, text="-X", variable=negx_var, command=on_change, width=20)
-                cb_negx.pack(side="left", padx=(8, 0))
-
-                checkboxes.extend([cb, cb_posx, cb_negx])
-
-            make_group(row_inner, "Positive Y axis", "pos_y")
-            make_group(row_inner, "Negative Y axis", "neg_y")
-
-            self._quadrant_rows.append({"row": row, "checkboxes": checkboxes})
-
-        self._apply_gating()
-
-    def _save_box_quadrant(self, index, group_key, group_on, posx_on, negx_on):
-        stored = dict(self.settings.get("multi_box_quadrants") or {})
-        entry = dict(stored.get(str(index), {}))
-        entry[group_key] = bool(group_on)
-        entry[f"{group_key}_posx"] = bool(posx_on)
-        entry[f"{group_key}_negx"] = bool(negx_on)
-        stored[str(index)] = entry
-        self.settings.set("multi_box_quadrants", stored)
+        for cb in self._axis_checkboxes:
+            cb.configure(state=widget_state)
 
     # --------------------------------------------------------------- sync
     def _refresh_from_settings(self):
@@ -400,5 +484,10 @@ class ConfigWindow(ctk.CTkToplevel):
         for key, card in self._mode_cards.items():
             card.configure(fg_color=CARD_BG_SELECTED if key == mode else CARD_BG)
 
-        self._rebuild_box_rows(count)
+        saved = self.settings.get("axis_quadrants") or {}
+        for group_key, (gv, pv, nv) in self._axis_vars.items():
+            gv.set(bool(saved.get(group_key, False)))
+            pv.set(bool(saved.get(f"{group_key}_posx", False)))
+            nv.set(bool(saved.get(f"{group_key}_negx", False)))
+
         self._apply_gating()

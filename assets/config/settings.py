@@ -31,7 +31,9 @@ DEFAULT_SETTINGS = {
     "x_axis_slider": 0.5,
     # Multiple Box Distance Merge - scaffold only for now (see config_window.py)
     "multi_box_count": 1,
-    "multi_box_quadrants": {},
+    # Single global axis restriction (Positive/Negative Y, +X/-X), shared
+    # across however many boxes multi_box_count is set to - NOT per box.
+    "axis_quadrants": {},
 }
 
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "..", "assets", "settings.json")
