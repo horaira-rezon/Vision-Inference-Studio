@@ -241,7 +241,7 @@ class MainApp(ctk.CTkFrame):
 
         self.screenshot_boxes_btn = ctk.CTkButton(
             sidebar,
-            text="Detection UI Window",
+            text="Detection UI Only",
             command=self.take_screenshot_boxes_only,
             fg_color="#033f2e",
             hover_color="#02553E",
