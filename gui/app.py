@@ -78,6 +78,22 @@ class MainApp(ctk.CTkFrame):
         self.flip_horizontal_enabled = False
         self.rotation_angle = 0
         self.display_transform = True
+        self.view_mode = "rgb"
+        self.binary_min = 0
+        self.binary_max = 255
+        self.hsv_h_min = 0
+        self.hsv_h_max = 179
+        self.hsv_s_min = 0
+        self.hsv_s_max = 255
+        self.hsv_v_min = 0
+        self.hsv_v_max = 255
+        self.hsl_h_min = 0
+        self.hsl_h_max = 179
+        self.hsl_l_min = 0
+        self.hsl_l_max = 255
+        self.hsl_s_min = 0
+        self.hsl_s_max = 255
+        self.has_thermal = False
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -101,7 +117,7 @@ class MainApp(ctk.CTkFrame):
         sidebar.grid(row=0, column=0, sticky="nsew")
 
         ctk.CTkLabel(
-            sidebar, text="Input / Output", font=ctk.CTkFont(size=20, weight="bold")
+            sidebar, text="I/O Commands", font=ctk.CTkFont(size=20, weight="bold")
         ).pack(fill="x", padx=16, pady=(16, 12))
 
         # --- Camera ---
@@ -664,6 +680,101 @@ class MainApp(ctk.CTkFrame):
         elif self.rotation_angle == 270:
             image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
+        if self.view_mode == "red":
+            image = image.copy()
+            image[:, :, 0] = 0
+            image[:, :, 1] = 0
+
+        elif self.view_mode == "green":
+            image = image.copy()
+            image[:, :, 0] = 0
+            image[:, :, 2] = 0
+
+        elif self.view_mode == "blue":
+            image = image.copy()
+            image[:, :, 1] = 0
+            image[:, :, 2] = 0
+
+        elif self.view_mode == "gray":
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            image = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+        elif self.view_mode == "binary":
+
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+            _, binary = cv2.threshold(
+                gray,
+                self.binary_min,
+                self.binary_max,
+                cv2.THRESH_BINARY
+            )
+
+            image = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+
+        elif self.view_mode == "hsv":
+
+            hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+            lower = (
+                self.hsv_h_min,
+                self.hsv_s_min,
+                self.hsv_v_min
+            )
+
+            upper = (
+                self.hsv_h_max,
+                self.hsv_s_max,
+                self.hsv_v_max
+            )
+
+            mask = cv2.inRange(hsv, lower, upper)
+
+            image = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+
+        elif self.view_mode == "hsl":
+
+            hls = cv2.cvtColor(image, cv2.COLOR_BGR2HLS)
+
+            lower = (
+                self.hsl_h_min,
+                self.hsl_l_min,
+                self.hsl_s_min
+            )
+
+            upper = (
+                self.hsl_h_max,
+                self.hsl_l_max,
+                self.hsl_s_max
+            )
+
+            mask = cv2.inRange(hls, lower, upper)
+
+            image = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+
+        elif self.view_mode == "depth":
+            if (
+                self.camera_source is not None
+                and getattr(self.camera_source, "has_depth", False)
+            ):
+                pass
+            else:
+                self.view_mode = "rgb"
+                self._show_notice(
+                    "No depth camera detected. Showing RGB stream.",
+                    "error"
+                )
+
+        elif self.view_mode == "thermal":
+            if self.has_thermal:
+                pass
+            else:
+                self.view_mode = "rgb"
+                self._show_notice(
+                    "No thermal camera detected. Showing RGB stream.",
+                    "error"
+                )
+
         return image
 
     def _transform_point(self, x, y, width, height):
@@ -1139,3 +1250,195 @@ class MainApp(ctk.CTkFrame):
             self.arduino.disconnect()
         if self.detection_worker:
             self.detection_worker.stop()
+
+    def show_rgb_channel(self):
+        self.view_mode = "rgb"
+
+    def show_red_channel(self):
+        self.view_mode = "red"
+
+    def show_green_channel(self):
+        self.view_mode = "green"
+
+    def show_blue_channel(self):
+        self.view_mode = "blue"
+
+    def show_grayscale(self):
+        self.view_mode = "gray"
+
+    def show_depth_channel(self):
+        self.view_mode = "depth"
+
+    def show_thermal_channel(self):
+        self.view_mode = "thermal"
+
+    def open_binary_threshold_settings(self):
+        self.view_mode = "binary"
+
+        self.binary_window = ctk.CTkToplevel(self)
+
+        self.binary_window.title("Binary Threshold")
+
+        self.binary_window.geometry("380x220")
+
+        self.binary_window.resizable(False, False)
+
+        ctk.CTkLabel(
+            self.binary_window,
+            text="Minimum Threshold"
+        ).pack(pady=(15, 2))
+
+        min_slider = ctk.CTkSlider(
+            self.binary_window,
+            from_=0,
+            to=255,
+            number_of_steps=255,
+            command=self._binary_min_changed
+        )
+
+        min_slider.set(self.binary_min)
+
+        min_slider.pack(fill="x", padx=20)
+
+        ctk.CTkLabel(
+            self.binary_window,
+            text="Maximum Threshold"
+        ).pack(pady=(15, 2))
+
+        max_slider = ctk.CTkSlider(
+            self.binary_window,
+            from_=0,
+            to=255,
+            number_of_steps=255,
+            command=self._binary_max_changed
+        )
+
+        max_slider.set(self.binary_max)
+
+        max_slider.pack(fill="x", padx=20)
+
+    def _binary_min_changed(self, value):
+        self.binary_min = int(value)
+
+    def _binary_max_changed(self, value):
+        self.binary_max = int(value)
+
+    def open_hsv_settings(self):
+
+        self.view_mode = "hsv"
+
+        self.hsv_window = ctk.CTkToplevel(self)
+
+        self.hsv_window.title("HSV Filter")
+
+        self.hsv_window.geometry("420x520")
+
+        self.hsv_window.resizable(False, False)
+
+        sliders = [
+            ("Hue Minimum", 0, 179, self.hsv_h_min, self._hsv_h_min_changed),
+            ("Hue Maximum", 0, 179, self.hsv_h_max, self._hsv_h_max_changed),
+
+            ("Saturation Minimum", 0, 255, self.hsv_s_min, self._hsv_s_min_changed),
+            ("Saturation Maximum", 0, 255, self.hsv_s_max, self._hsv_s_max_changed),
+
+            ("Value Minimum", 0, 255, self.hsv_v_min, self._hsv_v_min_changed),
+            ("Value Maximum", 0, 255, self.hsv_v_max, self._hsv_v_max_changed),
+        ]
+
+        for text, minimum, maximum, current, callback in sliders:
+
+            ctk.CTkLabel(
+                self.hsv_window,
+                text=text
+            ).pack(pady=(10,2))
+
+            slider = ctk.CTkSlider(
+                self.hsv_window,
+                from_=minimum,
+                to=maximum,
+                number_of_steps=maximum-minimum,
+                command=callback
+            )
+
+            slider.set(current)
+
+            slider.pack(fill="x", padx=20)
+
+    def _hsv_h_min_changed(self, value):
+        self.hsv_h_min = int(value)
+
+    def _hsv_h_max_changed(self, value):
+        self.hsv_h_max = int(value)
+
+    def _hsv_s_min_changed(self, value):
+        self.hsv_s_min = int(value)
+
+    def _hsv_s_max_changed(self, value):
+        self.hsv_s_max = int(value)
+
+    def _hsv_v_min_changed(self, value):
+        self.hsv_v_min = int(value)
+
+    def _hsv_v_max_changed(self, value):
+        self.hsv_v_max = int(value)
+
+    def open_hsl_settings(self):
+
+        self.view_mode = "hsl"
+
+        self.hsl_window = ctk.CTkToplevel(self)
+
+        self.hsl_window.title("HSL Filter")
+
+        self.hsl_window.geometry("420x520")
+
+        self.hsl_window.resizable(False, False)
+
+        sliders = [
+            ("Hue Minimum", 0, 179, self.hsl_h_min, self._hsl_h_min_changed),
+            ("Hue Maximum", 0, 179, self.hsl_h_max, self._hsl_h_max_changed),
+
+            ("Lightness Minimum", 0, 255, self.hsl_l_min, self._hsl_l_min_changed),
+            ("Lightness Maximum", 0, 255, self.hsl_l_max, self._hsl_l_max_changed),
+
+            ("Saturation Minimum", 0, 255, self.hsl_s_min, self._hsl_s_min_changed),
+            ("Saturation Maximum", 0, 255, self.hsl_s_max, self._hsl_s_max_changed),
+        ]
+
+        for text, minimum, maximum, current, callback in sliders:
+
+            ctk.CTkLabel(
+                self.hsl_window,
+                text=text
+            ).pack(pady=(10, 2))
+
+            slider = ctk.CTkSlider(
+                self.hsl_window,
+                from_=minimum,
+                to=maximum,
+                number_of_steps=maximum - minimum,
+                command=callback
+            )
+
+            slider.set(current)
+
+            slider.pack(fill="x", padx=20)
+
+    def _hsl_h_min_changed(self, value):
+        self.hsl_h_min = int(value)
+
+    def _hsl_h_max_changed(self, value):
+        self.hsl_h_max = int(value)
+
+    def _hsl_l_min_changed(self, value):
+        self.hsl_l_min = int(value)
+
+    def _hsl_l_max_changed(self, value):
+        self.hsl_l_max = int(value)
+
+    def _hsl_s_min_changed(self, value):
+        self.hsl_s_min = int(value)
+
+    def _hsl_s_max_changed(self, value):
+        self.hsl_s_max = int(value)
