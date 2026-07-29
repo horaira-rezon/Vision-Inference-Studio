@@ -15,12 +15,14 @@ from assets.visualization import overlay
 from assets.transform.coordinates import pixel_distance
 from assets.ui.file_dialogs import choose_file, choose_directory
 from gui.config_window import ConfigWindow
+from gui.view_controls import ViewControls
 
 # private/ is .gitignored - these imports fail gracefully if it's missing,
 # so the app still runs (RGB webcam mode) on a machine without it
 try:
     from my_version.nozzle_targeting import NozzleTargeting
     from my_version.nozzle_bridge import compute_target
+
     PRIVATE_MODULE_AVAILABLE = True
 except ImportError:
     NozzleTargeting = None
@@ -61,8 +63,10 @@ class MainApp(ctk.CTkFrame):
         self.nozzle = NozzleTargeting() if PRIVATE_MODULE_AVAILABLE else None
         self.recorder = Recorder()
         self.current_frame = None
-        self._raw_frame = None      # clean frame (no overlay), refreshed every loop
-        self._last_plan = None      # render plan for the same frame, for on-demand overlay variants
+        self._raw_frame = None  # clean frame (no overlay), refreshed every loop
+        self._last_plan = (
+            None  # render plan for the same frame, for on-demand overlay variants
+        )
         self.config_window = None
 
         self.mouse_x, self.mouse_y = 0, 0
@@ -70,6 +74,10 @@ class MainApp(ctk.CTkFrame):
         self.display_scale = 1.0  # updated every frame by _scale_to_panel
         self.recording_start_time = None
         self._recording_after_id = None
+        self.flip_vertical_enabled = False
+        self.flip_horizontal_enabled = False
+        self.rotation_angle = 0
+        self.display_transform = True
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -79,39 +87,61 @@ class MainApp(ctk.CTkFrame):
 
     # ------------------------------------------------------------ sidebar
     def _build_sidebar(self):
-        sidebar_container = ctk.CTkFrame(self, width=260, corner_radius=0, fg_color="#1a1d23")
+        sidebar_container = ctk.CTkFrame(
+            self, width=260, corner_radius=0, fg_color="#1a1d23"
+        )
         sidebar_container.grid(row=0, column=0, sticky="nsw")
         sidebar_container.grid_propagate(False)
         sidebar_container.grid_rowconfigure(0, weight=1)
         sidebar_container.grid_columnconfigure(0, weight=1)
 
-        sidebar = ctk.CTkScrollableFrame(sidebar_container, corner_radius=0, fg_color="#1a1d23")
+        sidebar = ctk.CTkScrollableFrame(
+            sidebar_container, corner_radius=0, fg_color="#1a1d23"
+        )
         sidebar.grid(row=0, column=0, sticky="nsew")
 
-        ctk.CTkLabel(sidebar, text="Setup", font=ctk.CTkFont(size=20, weight="bold")).pack(
-            anchor="w", padx=16, pady=(16, 12)
-        )
+        ctk.CTkLabel(
+            sidebar, text="Input / Output", font=ctk.CTkFont(size=20, weight="bold")
+        ).pack(fill="x", padx=16, pady=(16, 12))
 
         # --- Camera ---
         self.camera_dot = self._section_label_with_dot(sidebar, "1. Camera")
-        self.camera_btn = ctk.CTkButton(sidebar, text="Select Camera", command=self.select_camera, font=ctk.CTkFont(size=14))
+        self.camera_btn = ctk.CTkButton(
+            sidebar,
+            text="Select Camera",
+            command=self.select_camera,
+            font=ctk.CTkFont(size=14),
+        )
         self.camera_btn.pack(fill="x", padx=16, pady=(4, 2))
 
         # --- Model ---
         self.model_dot = self._section_label_with_dot(sidebar, "2. Detection Model")
-        self.model_btn = ctk.CTkButton(sidebar, text="Select Model Weight (.pt)", command=self.select_model, font=ctk.CTkFont(size=14))
+        self.model_btn = ctk.CTkButton(
+            sidebar,
+            text="Select Model Weight (.pt)",
+            command=self.select_model,
+            font=ctk.CTkFont(size=14),
+        )
         self.model_btn.pack(fill="x", padx=16, pady=(4, 2))
         self.skip_model_btn = ctk.CTkButton(
-            sidebar, text="Skip Model (Click Mode)", command=self.skip_model,
-            fg_color="#5e6471", hover_color="#4b5563", font=ctk.CTkFont(size=14)
+            sidebar,
+            text="Skip Model (Click Mode)",
+            command=self.skip_model,
+            fg_color="#5e6471",
+            hover_color="#4b5563",
+            font=ctk.CTkFont(size=14),
         )
         self.skip_model_btn.pack(fill="x", padx=16, pady=(0, 2))
 
         # --- Arduino ---
         self.arduino_dot = self._section_label_with_dot(sidebar, "3. Arduino")
         self.arduino_btn = ctk.CTkButton(
-            sidebar, text="Connect Arduino", command=self.toggle_arduino,
-            fg_color="#065f46", hover_color="#047857", font=ctk.CTkFont(size=14)
+            sidebar,
+            text="Connect Arduino",
+            command=self.toggle_arduino,
+            fg_color="#065f46",
+            hover_color="#047857",
+            font=ctk.CTkFont(size=14),
         )
         self.arduino_btn.pack(fill="x", padx=16, pady=(4, 2))
 
@@ -119,19 +149,33 @@ class MainApp(ctk.CTkFrame):
         self._section_label(sidebar, "4. Recording")
 
         self.video_folder_btn = ctk.CTkButton(
-            sidebar, text="Select Video Folder", command=self.select_video_folder,
-            fg_color="transparent", border_width=1, border_color="gray40", font=ctk.CTkFont(size=14)
+            sidebar,
+            text="Select Video Folder",
+            command=self.select_video_folder,
+            fg_color="transparent",
+            border_width=1,
+            border_color="gray40",
+            font=ctk.CTkFont(size=14),
         )
         self.video_folder_btn.pack(fill="x", padx=16, pady=(4, 2))
         self.video_folder_label = ctk.CTkLabel(
-            sidebar, text=self._short_path(self.settings.get("video_output_dir")) or "No folder selected",
-            font=ctk.CTkFont(size=14), text_color="gray60", anchor="w", justify="left",
+            sidebar,
+            text=self._short_path(self.settings.get("video_output_dir"))
+            or "No folder selected",
+            font=ctk.CTkFont(size=14),
+            text_color="gray60",
+            anchor="w",
+            justify="left",
         )
         self.video_folder_label.pack(anchor="w", padx=16, pady=(0, 8), fill="x")
 
         self.record_btn = ctk.CTkButton(
-            sidebar, text="Start Recording", command=self.toggle_recording,
-            fg_color="#7f1d1d", hover_color="#991b1b", font=ctk.CTkFont(size=14)
+            sidebar,
+            text="Start Recording",
+            command=self.toggle_recording,
+            fg_color="#7f1d1d",
+            hover_color="#991b1b",
+            font=ctk.CTkFont(size=14),
         )
         self.record_btn.pack(fill="x", padx=16, pady=(0, 14))
 
@@ -139,31 +183,53 @@ class MainApp(ctk.CTkFrame):
         self._section_label(sidebar, "5. Screenshot")
 
         self.screenshot_folder_btn = ctk.CTkButton(
-            sidebar, text="Select Image Folder", command=self.select_screenshot_folder,
-            fg_color="transparent", border_width=1, border_color="gray40", font=ctk.CTkFont(size=14)
+            sidebar,
+            text="Select Image Folder",
+            command=self.select_screenshot_folder,
+            fg_color="transparent",
+            border_width=1,
+            border_color="gray40",
+            font=ctk.CTkFont(size=14),
         )
         self.screenshot_folder_btn.pack(fill="x", padx=16, pady=(4, 2))
         self.screenshot_folder_label = ctk.CTkLabel(
-            sidebar, text=self._short_path(self.settings.get("screenshot_output_dir")) or "No folder selected",
-            font=ctk.CTkFont(size=14), text_color="gray60", anchor="w", justify="left",
+            sidebar,
+            text=self._short_path(self.settings.get("screenshot_output_dir"))
+            or "No folder selected",
+            font=ctk.CTkFont(size=14),
+            text_color="gray60",
+            anchor="w",
+            justify="left",
         )
         self.screenshot_folder_label.pack(anchor="w", padx=16, pady=(0, 8), fill="x")
 
         self.screenshot_btn = ctk.CTkButton(
-            sidebar, text="Window Screenshot", command=self.take_screenshot,
-            fg_color="#065f46", hover_color="#047857", font=ctk.CTkFont(size=14)
+            sidebar,
+            text="Window Screenshot",
+            command=self.take_screenshot,
+            fg_color="#065f46",
+            hover_color="#047857",
+            font=ctk.CTkFont(size=14),
         )
         self.screenshot_btn.pack(fill="x", padx=16, pady=(0, 2))
 
         self.screenshot_clean_btn = ctk.CTkButton(
-            sidebar, text="Capture Cam. Frame", command=self.take_screenshot_clean,
-            fg_color="#05523c", hover_color="#036247", font=ctk.CTkFont(size=14)
+            sidebar,
+            text="Capture Cam. Frame",
+            command=self.take_screenshot_clean,
+            fg_color="#05523c",
+            hover_color="#036247",
+            font=ctk.CTkFont(size=14),
         )
         self.screenshot_clean_btn.pack(fill="x", padx=16, pady=(0, 2))
 
         self.screenshot_boxes_btn = ctk.CTkButton(
-            sidebar, text="Detection UI Window", command=self.take_screenshot_boxes_only,
-            fg_color="#033f2e", hover_color="#02553E", font=ctk.CTkFont(size=14)
+            sidebar,
+            text="Detection UI Window",
+            command=self.take_screenshot_boxes_only,
+            fg_color="#033f2e",
+            hover_color="#02553E",
+            font=ctk.CTkFont(size=14),
         )
         self.screenshot_boxes_btn.pack(fill="x", padx=16, pady=(0, 14))
 
@@ -172,14 +238,21 @@ class MainApp(ctk.CTkFrame):
         footer = ctk.CTkFrame(sidebar_container, fg_color="#15181d", corner_radius=0)
         footer.grid(row=1, column=0, sticky="ew")
         self.config_btn = ctk.CTkButton(
-            footer, text="Configuration", command=self.open_configuration,
-            fg_color="#374151", hover_color="#4b5563", font=ctk.CTkFont(size=16)
+            footer,
+            text="Configuration",
+            command=self.open_configuration,
+            fg_color="#374151",
+            hover_color="#4b5563",
+            font=ctk.CTkFont(size=16),
         )
         self.config_btn.pack(fill="x", padx=16, pady=30)
 
     def _section_label(self, parent, text):
         ctk.CTkLabel(
-            parent, text=text, font=ctk.CTkFont(size=17, weight="bold"), text_color="gray70"
+            parent,
+            text=text,
+            font=ctk.CTkFont(size=17, weight="bold"),
+            text_color="gray70",
         ).pack(anchor="w", padx=16, pady=(16, 2))
 
     def _section_label_with_dot(self, parent, text):
@@ -188,13 +261,17 @@ class MainApp(ctk.CTkFrame):
         container.pack(anchor="w", padx=16, pady=(16, 2))
 
         label = ctk.CTkLabel(
-            container, text=text, font=ctk.CTkFont(size=17, weight="bold"), text_color="gray70"
+            container,
+            text=text,
+            font=ctk.CTkFont(size=17, weight="bold"),
+            text_color="gray70",
         )
         label.pack(side="left")
 
         # Use a CTkFrame for the dot to have precise control over dimensions
-        dot = ctk.CTkFrame(container, width=12, height=12, corner_radius=6,
-                          fg_color=DOT_COLORS["idle"])
+        dot = ctk.CTkFrame(
+            container, width=12, height=12, corner_radius=6, fg_color=DOT_COLORS["idle"]
+        )
         dot.pack(side="left", padx=(7, 0))
         dot.pack_propagate(False)  # Prevent the frame from shrinking to fit contents
         return dot
@@ -205,44 +282,69 @@ class MainApp(ctk.CTkFrame):
     def _short_path(self, path, max_len=30):
         if not path:
             return None
-        return path if len(path) <= max_len else "..." + path[-(max_len - 3):]
+        return path if len(path) <= max_len else "..." + path[-(max_len - 3) :]
 
     # --------------------------------------------------------- video area
     def _build_video_area(self):
-        # shared layout constants - used here AND in _scale_to_panel, so the
-        # video's placement and its available scaling space never drift out
-        # of sync with each other
         self.SIDE_MARGIN = 50
         self.TOP_MARGIN = 40
-        self.BOTTOM_GAP = 130     # reserved band at the bottom for the notice
-        self.SIZE_SHRINK = 0.82   # extra shrink beyond best-fit -> noticeably smaller by default
+        self.BOTTOM_GAP = 130
+        self.SIZE_SHRINK = 0.82
+
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_columnconfigure(2, weight=0)
 
         outer = ctk.CTkFrame(self, corner_radius=0, fg_color="#0b0d10")
         outer.grid(row=0, column=1, sticky="nsew")
-        self.video_frame = outer  # _scale_to_panel reads this size each frame
+        self.video_frame = outer
 
-        self.video_label = tk.Label(outer, bg="#0b0d10", fg="white",
-                                     text="Select a camera to begin",
-                                     font=("Arial", 14))
-        # Centered within the region ABOVE the reserved bottom gap (not the
-        # whole window) - shifting up by half the (gap - top margin) keeps
-        # it visually centered in its own area rather than the full panel.
-        self.video_label.place(relx=0.5, rely=0.5, anchor="center",
-                                y=(self.TOP_MARGIN - self.BOTTOM_GAP) // 2)
+        self.video_label = tk.Label(
+            outer,
+            bg="#0b0d10",
+            fg="white",
+            text="Select a camera to begin",
+            font=("Arial", 14),
+        )
+
+        self.video_label.place(
+            relx=0.5,
+            rely=0.5,
+            anchor="center",
+            y=(self.TOP_MARGIN - self.BOTTOM_GAP) // 2,
+        )
+
         self.video_label.bind("<Button-1>", self._on_click)
 
-        # floating notice - vertically centered in the gap between the
-        # video's bottom edge and the window's bottom edge (not glued to
-        # either one)
         self.notice_bar = ctk.CTkLabel(
-            outer, text="", font=ctk.CTkFont(size=20),
-            fg_color="transparent", text_color=NOTICE_COLORS["idle"],
+            outer,
+            text="",
+            font=ctk.CTkFont(size=20),
+            fg_color="transparent",
+            text_color=NOTICE_COLORS["idle"],
         )
-        self.notice_bar.place(relx=0.5, rely=1.0, anchor="center",
-                               y=-(self.BOTTOM_GAP // 2))
+
+        self.notice_bar.place(
+            relx=0.5, rely=1.0, anchor="center", y=-(self.BOTTOM_GAP // 2)
+        )
+
+        self.right_sidebar_container = ctk.CTkFrame(
+            self, width=320, corner_radius=0, fg_color="#1a1d23"
+        )
+
+        self.right_sidebar_container.grid(row=0, column=2, sticky="nse")
+
+        self.right_sidebar_container.grid_propagate(False)
+        self.right_sidebar_container.grid_rowconfigure(0, weight=1)
+        self.right_sidebar_container.grid_columnconfigure(0, weight=1)
+
+        self.right_sidebar = ViewControls(self.right_sidebar_container, self)
+
+        self.right_sidebar.grid(row=0, column=0, sticky="nsew")
 
     def _show_notice(self, text, color_key="ok"):
-        self.notice_bar.configure(text=text, text_color=NOTICE_COLORS.get(color_key, "gray70"))
+        self.notice_bar.configure(
+            text=text, text_color=NOTICE_COLORS.get(color_key, "gray70")
+        )
         self.notice_bar.lift()
         self.after(4000, lambda: self.notice_bar.configure(text=""))
 
@@ -266,12 +368,16 @@ class MainApp(ctk.CTkFrame):
         picker = ctk.CTkToplevel(self.master)
         picker.title("Select Camera")
         picker.geometry("300x240")
-        ctk.CTkLabel(picker, text="Multiple cameras found",
-                     font=ctk.CTkFont(size=14, weight="bold")).pack(padx=12, pady=(16, 8))
+        ctk.CTkLabel(
+            picker,
+            text="Multiple cameras found",
+            font=ctk.CTkFont(size=14, weight="bold"),
+        ).pack(padx=12, pady=(16, 8))
         for opt in options:
             ctk.CTkButton(
-                picker, text=opt,
-                command=lambda o=opt: (self._start_camera(o), picker.destroy())
+                picker,
+                text=opt,
+                command=lambda o=opt: (self._start_camera(o), picker.destroy()),
             ).pack(fill="x", padx=16, pady=4)
 
     def _start_camera(self, choice):
@@ -291,11 +397,15 @@ class MainApp(ctk.CTkFrame):
 
     # ------------------------------------------------------ model
     def select_model(self):
-        path = choose_file("Select Model Weight", pattern="*.pt", pattern_label="PyTorch weights")
+        path = choose_file(
+            "Select Model Weight", pattern="*.pt", pattern_label="PyTorch weights"
+        )
         if not path:
             return
         self._show_notice("Loading model...", "warn")
-        threading.Thread(target=self._load_model_async, args=(path,), daemon=True).start()
+        threading.Thread(
+            target=self._load_model_async, args=(path,), daemon=True
+        ).start()
 
     def _load_model_async(self, path):
         try:
@@ -336,7 +446,6 @@ class MainApp(ctk.CTkFrame):
             self.master, self.settings, has_model_fn=lambda: self.model is not None
         )
 
-
     # --------------------------------------------------- arduino (toggle)
     def toggle_arduino(self):
         if self.arduino is None or not self.arduino.is_connected:
@@ -349,7 +458,9 @@ class MainApp(ctk.CTkFrame):
             )
             try:
                 self.arduino.connect()
-                self.arduino_btn.configure(text="Disconnect Arduino", fg_color="#7f1d1d", hover_color="#991b1b")
+                self.arduino_btn.configure(
+                    text="Disconnect Arduino", fg_color="#7f1d1d", hover_color="#991b1b"
+                )
                 self._set_dot(self.arduino_dot, "ok")
                 self._show_notice("Arduino connected", "ok")
             except Exception as e:
@@ -357,7 +468,9 @@ class MainApp(ctk.CTkFrame):
                 self._show_notice(str(e), "error")
         else:
             self.arduino.disconnect()
-            self.arduino_btn.configure(text="Connect Arduino", fg_color="#065f46", hover_color="#047857")
+            self.arduino_btn.configure(
+                text="Connect Arduino", fg_color="#065f46", hover_color="#047857"
+            )
             self._set_dot(self.arduino_dot, "idle")
             self._show_notice("Arduino disconnected", "idle")
 
@@ -409,7 +522,9 @@ class MainApp(ctk.CTkFrame):
             time_str = f"{hrs:02d}:{mins:02d}:{secs:02d}"
         else:
             time_str = f"{mins:02d}:{secs:02d}"
-        self.notice_bar.configure(text=f"Recording: {time_str}", text_color=NOTICE_COLORS["warn"])
+        self.notice_bar.configure(
+            text=f"Recording: {time_str}", text_color=NOTICE_COLORS["warn"]
+        )
         self.notice_bar.lift()
         # schedule next update
         self._recording_after_id = self.after(1000, self._update_recording_notice)
@@ -420,14 +535,17 @@ class MainApp(ctk.CTkFrame):
 
     def take_screenshot_clean(self):
         """No UI elements at all - the raw camera frame."""
-        self._save_screenshot(self._raw_frame)
+        if self._raw_frame is None:
+            return
+        frame = self._transform_display_image(self._raw_frame.copy())
+        self._save_screenshot(frame)
 
     def take_screenshot_boxes_only(self):
         """Detection boxes + labels (or the click dot, in click-mode) -
         no crosshair, no diagonal line, no text overlay."""
         if self._raw_frame is None or self._last_plan is None:
             return
-        frame = self._raw_frame.copy()
+        frame = self._transform_display_image(self._raw_frame.copy())
         self._apply_render_plan(frame, self._last_plan, scale=1.0, mode="boxes_only")
         self._save_screenshot(frame)
 
@@ -442,11 +560,26 @@ class MainApp(ctk.CTkFrame):
 
     # ----------------------------------------------------------- mouse
     def _on_click(self, event):
-        # event.x/y are in displayed (scaled) pixels - convert back to the
-        # original camera resolution so depth/detection lookups stay correct
-        self.mouse_x = int(event.x / self.display_scale)
-        self.mouse_y = int(event.y / self.display_scale)
-        self.mouse_clicked = True  # mark that user has clicked
+
+        if self.current_frame is None:
+            return
+
+        display_x = int(event.x / self.display_scale)
+        display_y = int(event.y / self.display_scale)
+
+        raw_h, raw_w = self.current_frame.shape[:2]
+
+        raw_x, raw_y = self._inverse_transform_point(
+            display_x,
+            display_y,
+            raw_w,
+            raw_h,
+        )
+
+        self.mouse_x = raw_x
+        self.mouse_y = raw_y
+
+        self.mouse_clicked = True
 
     # ------------------------------------------------------- frame loop
     def update_frame(self):
@@ -454,17 +587,22 @@ class MainApp(ctk.CTkFrame):
             return
 
         raw_image, depth_frame, cx, cy = self.camera_source.read()
+        self.raw_width = raw_image.shape[1]
+        self.raw_height = raw_image.shape[0]
         if raw_image is not None:
             # Compute everything ONCE - detection inference, nozzle math,
             # and any Arduino send all happen exactly one time per frame,
             # regardless of how many times the result gets drawn below.
             plan = self._build_render_plan(raw_image, depth_frame, cx, cy)
-            self._raw_frame = raw_image.copy()   # clean, no overlay - for screenshot variants
+            self._raw_frame = (
+                raw_image.copy()
+            )  # clean, no overlay - for screenshot variants
             self._last_plan = plan
 
             # Native-resolution pass: what gets recorded/screenshotted -
             # unchanged from before, same resolution as the raw camera feed.
             record_image = raw_image.copy()
+            record_image = self._transform_display_image(record_image)
             self._apply_render_plan(record_image, plan, scale=1.0)
             self.current_frame = record_image
             self.recorder.write_frame(record_image)
@@ -474,6 +612,7 @@ class MainApp(ctk.CTkFrame):
             # thicker lines, bigger text) instead of upscaling an already-
             # rasterized overlay - this is what keeps text/lines crisp.
             display_image, scale = self._scale_raw_to_panel(raw_image)
+            display_image = self._transform_display_image(display_image)
             self._apply_render_plan(display_image, plan, scale=scale)
 
             rgb = cv2.cvtColor(display_image, cv2.COLOR_BGR2RGB)
@@ -501,6 +640,106 @@ class MainApp(ctk.CTkFrame):
 
         new_w, new_h = int(img_w * scale), int(img_h * scale)
         return cv2.resize(image, (new_w, new_h)), scale
+
+    def _transform_display_image(self, image):
+        """
+        Transform ONLY the displayed camera image.
+
+        Overlay elements are NOT transformed here.
+        They will be redrawn later using transformed coordinates.
+        """
+
+        if self.flip_horizontal_enabled:
+            image = cv2.flip(image, 1)
+
+        if self.flip_vertical_enabled:
+            image = cv2.flip(image, 0)
+
+        if self.rotation_angle == 90:
+            image = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+
+        elif self.rotation_angle == 180:
+            image = cv2.rotate(image, cv2.ROTATE_180)
+
+        elif self.rotation_angle == 270:
+            image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+        return image
+
+    def _transform_point(self, x, y, width, height):
+        """
+        Transform one pixel coordinate according to the current
+        display orientation.
+
+        This transforms coordinates only.
+
+        Nothing is drawn here.
+        """
+
+        if self.flip_horizontal_enabled:
+            x = width - 1 - x
+
+        if self.flip_vertical_enabled:
+            y = height - 1 - y
+
+        if self.rotation_angle == 90:
+            x, y = height - 1 - y, x
+            width, height = height, width
+
+        elif self.rotation_angle == 180:
+            x = width - 1 - x
+            y = height - 1 - y
+
+        elif self.rotation_angle == 270:
+            x, y = y, width - 1 - x
+            width, height = height, width
+
+        return x, y
+
+    def _inverse_transform_point(self, x, y, width, height):
+        """
+        Convert a DISPLAY coordinate back into the original RAW
+        camera coordinate.
+        """
+
+        if self.rotation_angle == 90:
+            x, y = y, height - 1 - x
+            width, height = height, width
+
+        elif self.rotation_angle == 180:
+            x = width - 1 - x
+            y = height - 1 - y
+
+        elif self.rotation_angle == 270:
+            x, y = width - 1 - y, x
+            width, height = height, width
+
+        if self.flip_vertical_enabled:
+            y = height - 1 - y
+
+        if self.flip_horizontal_enabled:
+            x = width - 1 - x
+
+        return x, y
+
+    def _transform_box(self, x1, y1, x2, y2, width, height):
+
+        corners = [
+            self._transform_point(x1, y1, width, height),
+            self._transform_point(x2, y1, width, height),
+            self._transform_point(x1, y2, width, height),
+            self._transform_point(x2, y2, width, height),
+        ]
+
+        xs = [p[0] for p in corners]
+        ys = [p[1] for p in corners]
+
+        return (
+            min(xs),
+            min(ys),
+            max(xs),
+            max(ys),
+        )
 
     def _compute_axis_y(self, cy, h):
         """Row the horizontal crosshair line should be drawn on, in the
@@ -533,10 +772,10 @@ class MainApp(ctk.CTkFrame):
         plan = {
             "center": (cx, cy),
             "axis_y": self._compute_axis_y(cy, image.shape[0]),
-            "boxes": [],        # (x1, y1, x2, y2, label, conf) - every detection
-            "centroids": [],    # (cx, cy) - every detection's centroid
+            "boxes": [],  # (x1, y1, x2, y2, label, conf) - every detection
+            "centroids": [],  # (cx, cy) - every detection's centroid
             "primary_target": None,
-            "target_style": None,   # "ok" | "error" | "unavailable" | None
+            "target_style": None,  # "ok" | "error" | "unavailable" | None
             "text_lines": [],
         }
 
@@ -553,7 +792,10 @@ class MainApp(ctk.CTkFrame):
                 ocx, ocy = (x1 + x2) // 2, (y1 + y2) // 2
                 plan["centroids"].append((ocx, ocy))
                 if i == 0:
-                    plan["primary_target"] = (ocx, ocy)  # first detection drives line/text/nozzle
+                    plan["primary_target"] = (
+                        ocx,
+                        ocy,
+                    )  # first detection drives line/text/nozzle
         else:
             if self.mouse_clicked:
                 mx, my = self.mouse_x, self.mouse_y
@@ -568,15 +810,24 @@ class MainApp(ctk.CTkFrame):
 
         if self.camera_source.has_depth and depth_frame is not None:
             if PRIVATE_MODULE_AVAILABLE:
-                arduino_conn = self.arduino.connection if (self.arduino and self.arduino.is_connected) else None
-                result = compute_target(self.camera_source, depth_frame, tx, ty, self.nozzle, arduino_conn)
+                arduino_conn = (
+                    self.arduino.connection
+                    if (self.arduino and self.arduino.is_connected)
+                    else None
+                )
+                result = compute_target(
+                    self.camera_source, depth_frame, tx, ty, self.nozzle, arduino_conn
+                )
                 if result is None:
                     plan["target_style"] = "error"
                 else:
                     plan["target_style"] = "ok"
                     plan["text_lines"] = [
                         (f"Diag Dist: {result['diag']:.3f} m", (0, 255, 0)),
-                        (f"Target Ang: {result['angle']:.1f} deg ({result['direction']})", (0, 255, 0)),
+                        (
+                            f"Target Ang: {result['angle']:.1f} deg ({result['direction']})",
+                            (0, 255, 0),
+                        ),
                         (f"Steps to Move: {result['steps']}", (0, 255, 0)),
                         (f"Nozzle At: {result['nozzle_angle']:.1f} deg", (0, 255, 0)),
                     ]
@@ -589,7 +840,9 @@ class MainApp(ctk.CTkFrame):
 
         return plan
 
-    def _draw_target_lines(self, image, plan, s_cx, s_axis_y, s_tx, s_ty, scale, color=None):
+    def _draw_target_lines(
+        self, image, plan, s_cx, s_axis_y, s_tx, s_ty, scale, color=None
+    ):
         """Draws one diagonal line (in the existing style) per detected
         box, pointing at that box's own centroid - not just at the first
         detection's. Falls back to a single line to the click/primary
@@ -597,12 +850,49 @@ class MainApp(ctk.CTkFrame):
         if plan["boxes"]:
             for box, centroid in zip(plan["boxes"], plan["centroids"]):
                 x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
-                sbox = (int(x1 * scale), int(y1 * scale), int(x2 * scale), int(y2 * scale))
+
+                tx1, ty1, tx2, ty2 = self._transform_box(
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    self.raw_width,
+                    self.raw_height,
+                )
+
+                sbox = (
+                    int(tx1 * scale),
+                    int(ty1 * scale),
+                    int(tx2 * scale),
+                    int(ty2 * scale),
+                )
+
                 ocx, ocy = centroid
-                s_ocx, s_ocy = int(ocx * scale), int(ocy * scale)
-                overlay.draw_click_marker(image, s_cx, s_axis_y, s_ocx, s_ocy, box=sbox, color=color, scale=scale)
+
+                tocx, tocy = self._transform_point(
+                    ocx,
+                    ocy,
+                    self.raw_width,
+                    self.raw_height,
+                )
+
+                s_ocx = int(tocx * scale)
+                s_ocy = int(tocy * scale)
+
+                overlay.draw_click_marker(
+                    image,
+                    s_cx,
+                    s_axis_y,
+                    s_ocx,
+                    s_ocy,
+                    box=sbox,
+                    color=color,
+                    scale=scale,
+                )
         else:
-            overlay.draw_click_marker(image, s_cx, s_axis_y, s_tx, s_ty, color=color, scale=scale)
+            overlay.draw_click_marker(
+                image, s_cx, s_axis_y, s_tx, s_ty, color=color, scale=scale
+            )
 
     def _apply_render_plan(self, image, plan, scale=1.0, mode="full"):
         """Pure drawing - safe to call more than once per frame with the
@@ -616,20 +906,90 @@ class MainApp(ctk.CTkFrame):
             line, no text - for the "Screenshot (Boxes/Clicks Only)" button.
         """
         cx, cy = plan["center"]
-        s_cx, s_cy = int(cx * scale), int(cy * scale)
+
+        img_w = self.raw_width
+        img_h = self.raw_height
+
+        tx, ty = self._transform_point(
+            cx,
+            cy,
+            img_w,
+            img_h,
+        )
+
+        s_cx = int(tx * scale)
+        s_cy = int(ty * scale)
+
         axis_y = plan.get("axis_y", cy)
-        s_axis_y = int(axis_y * scale)
+
+        _, axis_ty = self._transform_point(
+            cx,
+            axis_y,
+            img_w,
+            img_h,
+        )
+
+        s_axis_y = int(axis_ty * scale)
 
         if mode == "boxes_only":
             if plan["boxes"]:
-                for (x1, y1, x2, y2, label, conf) in plan["boxes"]:
-                    sbox = (int(x1 * scale), int(y1 * scale), int(x2 * scale), int(y2 * scale))
-                    overlay.draw_detection_box(image, sbox, label, conf, scale=scale)
-                for (ocx, ocy) in plan["centroids"]:
-                    overlay.draw_centroid_marker(image, int(ocx * scale), int(ocy * scale), scale=scale)
+                for x1, y1, x2, y2, label, conf in plan["boxes"]:
+
+                    tx1, ty1, tx2, ty2 = self._transform_box(
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        img_w,
+                        img_h,
+                    )
+
+                    sbox = (
+                        int(tx1 * scale),
+                        int(ty1 * scale),
+                        int(tx2 * scale),
+                        int(ty2 * scale),
+                    )
+
+                    overlay.draw_detection_box(
+                        image,
+                        sbox,
+                        label,
+                        conf,
+                        scale=scale,
+                    )
+                for ocx, ocy in plan["centroids"]:
+
+                    tx, ty = self._transform_point(
+                        ocx,
+                        ocy,
+                        img_w,
+                        img_h,
+                    )
+
+                    overlay.draw_centroid_marker(
+                        image,
+                        int(tx * scale),
+                        int(ty * scale),
+                        scale=scale,
+                    )
             elif plan["primary_target"] is not None:
+
                 tx, ty = plan["primary_target"]
-                overlay.draw_centroid_marker(image, int(tx * scale), int(ty * scale), scale=scale)
+
+                ttx, tty = self._transform_point(
+                    tx,
+                    ty,
+                    img_w,
+                    img_h,
+                )
+
+                overlay.draw_centroid_marker(
+                    image,
+                    int(ttx * scale),
+                    int(tty * scale),
+                    scale=scale,
+                )
             return
 
         overlay.draw_axes(image, s_cx, s_axis_y, thickness=max(1, round(scale)))
@@ -644,18 +1004,47 @@ class MainApp(ctk.CTkFrame):
         diagonal_on = bool(self.settings.get("diagonal_distance_on"))
 
         tx, ty = plan["primary_target"]
-        s_tx, s_ty = int(tx * scale), int(ty * scale)
+
+        ttx, tty = self._transform_point(
+            tx,
+            ty,
+            img_w,
+            img_h,
+        )
+
+        s_tx = int(ttx * scale)
+        s_ty = int(tty * scale)
 
         if plan["target_style"] == "error":
             if diagonal_on:
-                self._draw_target_lines(image, plan, s_cx, s_axis_y, s_tx, s_ty, scale, color=(0, 0, 255))
-                cv2.putText(image, "No Depth Data", (int(20 * scale), int(40 * scale)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6 * scale, (0, 0, 255), max(1, round(2 * scale)), cv2.LINE_AA)
+                self._draw_target_lines(
+                    image, plan, s_cx, s_axis_y, s_tx, s_ty, scale, color=(0, 0, 255)
+                )
+                cv2.putText(
+                    image,
+                    "No Depth Data",
+                    (int(20 * scale), int(40 * scale)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6 * scale,
+                    (0, 0, 255),
+                    max(1, round(2 * scale)),
+                    cv2.LINE_AA,
+                )
         elif plan["target_style"] == "unavailable":
             if diagonal_on:
-                self._draw_target_lines(image, plan, s_cx, s_axis_y, s_tx, s_ty, scale, color=(0, 0, 255))
-                cv2.putText(image, "Depth targeting module not available", (int(20 * scale), int(40 * scale)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5 * scale, (0, 0, 255), max(1, round(2 * scale)), cv2.LINE_AA)
+                self._draw_target_lines(
+                    image, plan, s_cx, s_axis_y, s_tx, s_ty, scale, color=(0, 0, 255)
+                )
+                cv2.putText(
+                    image,
+                    "Depth targeting module not available",
+                    (int(20 * scale), int(40 * scale)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5 * scale,
+                    (0, 0, 255),
+                    max(1, round(2 * scale)),
+                    cv2.LINE_AA,
+                )
         else:  # "ok"
             if diagonal_on:
                 self._draw_target_lines(image, plan, s_cx, s_axis_y, s_tx, s_ty, scale)
@@ -664,15 +1053,80 @@ class MainApp(ctk.CTkFrame):
                 # detection's own centroid dot is drawn below regardless)
                 overlay.draw_centroid_marker(image, s_tx, s_ty, scale=scale)
 
-            for (x1, y1, x2, y2, label, conf) in plan["boxes"]:
-                sbox = (int(x1 * scale), int(y1 * scale), int(x2 * scale), int(y2 * scale))
-                overlay.draw_detection_box(image, sbox, label, conf, scale=scale)
+            for x1, y1, x2, y2, label, conf in plan["boxes"]:
 
-            for (ocx, ocy) in plan["centroids"]:
-                overlay.draw_centroid_marker(image, int(ocx * scale), int(ocy * scale), scale=scale)
+                tx1, ty1, tx2, ty2 = self._transform_box(
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    img_w,
+                    img_h,
+                )
+
+                sbox = (
+                    int(tx1 * scale),
+                    int(ty1 * scale),
+                    int(tx2 * scale),
+                    int(ty2 * scale),
+                )
+
+                overlay.draw_detection_box(
+                    image,
+                    sbox,
+                    label,
+                    conf,
+                    scale=scale,
+                )
+
+            for ocx, ocy in plan["centroids"]:
+
+                tx, ty = self._transform_point(
+                    ocx,
+                    ocy,
+                    img_w,
+                    img_h,
+                )
+
+                overlay.draw_centroid_marker(
+                    image,
+                    int(tx * scale),
+                    int(ty * scale),
+                    scale=scale,
+                )
 
             if diagonal_on:
                 overlay.draw_text_lines(image, plan["text_lines"], scale=scale)
+
+    def flip_vertical(self):
+        self.flip_vertical_enabled = not self.flip_vertical_enabled
+
+        state = "ON" if self.flip_vertical_enabled else "OFF"
+
+        self._show_notice(f"Vertical Flip : {state}", "ok")
+
+    def flip_horizontal(self):
+        self.flip_horizontal_enabled = not self.flip_horizontal_enabled
+
+        state = "ON" if self.flip_horizontal_enabled else "OFF"
+
+        self._show_notice(f"Horizontal Flip : {state}", "ok")
+
+    def rotate_cw(self):
+        self.rotation_angle = (self.rotation_angle + 90) % 360
+
+        self._show_notice(
+            f"Rotation : {self.rotation_angle}°",
+            "ok",
+        )
+
+    def rotate_ccw(self):
+        self.rotation_angle = (self.rotation_angle - 90) % 360
+
+        self._show_notice(
+            f"Rotation : {self.rotation_angle}°",
+            "ok",
+        )
 
     # ------------------------------------------------------------ close
     def on_close(self):

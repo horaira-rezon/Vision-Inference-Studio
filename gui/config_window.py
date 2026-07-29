@@ -232,8 +232,8 @@ class ConfigWindow(ctk.CTkToplevel):
             box_inner, text="Axis Configuration", font=ctk.CTkFont(size=13, weight="bold")
         ).pack(anchor="w", pady=(4, 4))
 
-        self._make_axis_group(box_inner, "Positive Y axis", "pos_y")
-        self._make_axis_group(box_inner, "Negative Y axis", "neg_y")
+        self._make_axis_group(box_inner, "+Y axis", "pos_y")
+        self._make_axis_group(box_inner, "-Y axis", "neg_y")
 
         # --- Save / Reset ---
         footer = ctk.CTkFrame(scroll, fg_color="transparent")
