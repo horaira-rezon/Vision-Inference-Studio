@@ -18,22 +18,18 @@ class ViewControls(ctk.CTkScrollableFrame):
             ).pack(fill="x", padx=16, pady=(16, 12))
 
             self._build_orientation()
-
             self._build_rotation()
-
             self._build_rgb_section()
-
-            self._build_depth_section()
-
+            self._build_hsv_hsl_section()
             self._build_grayscale_section()
-
             self._build_binary_section()
-
+            self._build_depth_section()
             self._build_thermal_section()
 
-            self._build_hsv_section()
-
-            self._build_hsl_section()
+    def _reset_orientation(self):
+        self.app.rotation_angle = 0
+        self.app.flip_vertical_enabled = False
+        self.app.flip_horizontal_enabled = False
 
     def _section_label(self, text):
         ctk.CTkLabel(
@@ -66,7 +62,21 @@ class ViewControls(ctk.CTkScrollableFrame):
         right.grid(row=0, column=1, padx=(4, 0), sticky="ew")
 
     def _build_orientation(self):
-        self._section_label("Orientation")
+        frame = ctk.CTkFrame(self, fg_color="transparent")
+        frame.pack(fill="x", padx=16, pady=(16, 6))
+        frame.grid_columnconfigure(0, weight=1)
+
+        label = ctk.CTkLabel(frame, text="Orientation", font=self.section_font, text_color="gray70")
+        label.grid(row=0, column=0, sticky="w")
+
+        reset_btn = ctk.CTkButton(
+            frame,
+            text="⟳",
+            width=28,
+            height=28,
+            command=self._reset_orientation
+        )
+        reset_btn.grid(row=0, column=1, padx=(4, 0), sticky="e")
 
         self._two_button_row(
             "Flip Vertical",
@@ -76,7 +86,21 @@ class ViewControls(ctk.CTkScrollableFrame):
         )
 
     def _build_rotation(self):
-        self._section_label("Rotation")
+        frame = ctk.CTkFrame(self, fg_color="transparent")
+        frame.pack(fill="x", padx=16, pady=(16, 6))
+        frame.grid_columnconfigure(0, weight=1)
+
+        label = ctk.CTkLabel(frame, text="Rotation", font=self.section_font, text_color="gray70")
+        label.grid(row=0, column=0, sticky="w")
+
+        reset_btn = ctk.CTkButton(
+            frame,
+            text="⟳",
+            width=28,
+            height=28,
+            command=self._reset_orientation
+        )
+        reset_btn.grid(row=0, column=1, padx=(4, 0), sticky="e")
 
         self._two_button_row(
             "Rotate CCW",
@@ -88,38 +112,46 @@ class ViewControls(ctk.CTkScrollableFrame):
     def _build_rgb_section(self):
         self._section_label("RGB Channel")
 
-        ctk.CTkButton(
-            self,
-            text="RGB",
-            command=self.app.show_rgb_channel,
-            font=self.button_font
-        ).pack(fill="x", padx=16, pady=(0, 4))
-
         frame = ctk.CTkFrame(self, fg_color="transparent")
         frame.pack(fill="x", padx=16, pady=(0, 4))
 
-        frame.grid_columnconfigure((0, 1, 2), weight=1)
+        frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
+
+        ctk.CTkButton(
+            frame,
+            text="RGB",
+            command=self.app.show_rgb_channel,
+            font=self.button_font,
+            fg_color="#5e6471",
+            hover_color="#4b5563"
+        ).grid(row=0, column=0, padx=(0, 3), sticky="ew")
 
         ctk.CTkButton(
             frame,
             text="Red",
             command=self.app.show_red_channel,
-            font=self.button_font
-        ).grid(row=0, column=0, padx=(0, 3), sticky="ew")
+            font=self.button_font,
+            fg_color="#7f1d1d",
+            hover_color="#991b1b"
+        ).grid(row=0, column=1, padx=3, sticky="ew")
 
         ctk.CTkButton(
             frame,
             text="Green",
             command=self.app.show_green_channel,
-            font=self.button_font
-        ).grid(row=0, column=1, padx=3, sticky="ew")
+            font=self.button_font,
+            fg_color="#065f46",
+            hover_color="#047857"
+        ).grid(row=0, column=2, padx=3, sticky="ew")
 
         ctk.CTkButton(
             frame,
             text="Blue",
             command=self.app.show_blue_channel,
-            font=self.button_font
-        ).grid(row=0, column=2, padx=(3, 0), sticky="ew")
+            font=self.button_font,
+            fg_color="#2a6093",
+            hover_color="#3d77ad"
+        ).grid(row=0, column=3, padx=(3, 0), sticky="ew")
 
     def _build_depth_section(self):
         self._section_label("Depth Channel")
@@ -128,7 +160,9 @@ class ViewControls(ctk.CTkScrollableFrame):
             self,
             text="Depth View",
             command=self.app.show_depth_channel,
-            font=self.button_font
+            font=self.button_font,
+            fg_color="#374151",
+            hover_color="#4b5563",
         ).pack(fill="x", padx=16, pady=(0, 4))
 
     def _build_grayscale_section(self):
@@ -138,7 +172,9 @@ class ViewControls(ctk.CTkScrollableFrame):
             self,
             text="Show Grayscale",
             command=self.app.show_grayscale,
-            font=self.button_font
+            font=self.button_font,
+            fg_color="#374151",
+            hover_color="#4b5563",
         ).pack(fill="x", padx=16, pady=(0, 4))
 
     def _build_binary_section(self):
@@ -148,7 +184,9 @@ class ViewControls(ctk.CTkScrollableFrame):
             self,
             text="Threshold Settings",
             command=self.app.open_binary_threshold_settings,
-            font=self.button_font
+            font=self.button_font,
+            fg_color="#374151",
+            hover_color="#4b5563",
         ).pack(fill="x", padx=16, pady=(0, 4))
 
     def _build_thermal_section(self):
@@ -158,25 +196,17 @@ class ViewControls(ctk.CTkScrollableFrame):
             self,
             text="Thermal View",
             command=self.app.show_thermal_channel,
-            font=self.button_font
+            font=self.button_font,
+            fg_color="#374151",
+            hover_color="#4b5563",
         ).pack(fill="x", padx=16, pady=(0, 4))
 
-    def _build_hsv_section(self):
-        self._section_label("HSV Channel")
+    def _build_hsv_hsl_section(self):
+        self._section_label("HSV / HSL Channel")
 
-        ctk.CTkButton(
-            self,
-            text="HSV Settings",
-            command=self.app.open_hsv_settings,
-            font=self.button_font
-        ).pack(fill="x", padx=16, pady=(0, 4))
-
-    def _build_hsl_section(self):
-        self._section_label("HSL Channel")
-
-        ctk.CTkButton(
-            self,
-            text="HSL Settings",
-            command=self.app.open_hsl_settings,
-            font=self.button_font
-        ).pack(fill="x", padx=16, pady=(0, 12))
+        self._two_button_row(
+            "HSV Settings",
+            self.app.open_hsv_settings,
+            "HSL Settings",
+            self.app.open_hsl_settings
+        )
