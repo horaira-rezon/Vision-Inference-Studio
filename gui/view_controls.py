@@ -3,28 +3,28 @@ import customtkinter as ctk
 
 class ViewControls(ctk.CTkScrollableFrame):
     def __init__(self, parent, app):
-            super().__init__(parent, corner_radius=0, fg_color="#1a1d23")
+        super().__init__(parent, corner_radius=0, fg_color="#1a1d23")
 
-            self.app = app
+        self.app = app
 
-            self.button_font = ctk.CTkFont(size=14)
-            self.section_font = ctk.CTkFont(size=17, weight="bold")
-            self.title_font = ctk.CTkFont(size=20, weight="bold")
+        self.button_font = ctk.CTkFont(size=14)
+        self.section_font = ctk.CTkFont(size=17, weight="bold")
+        self.title_font = ctk.CTkFont(size=20, weight="bold")
 
-            ctk.CTkLabel(
-                self,
-                text="View Controls",
-                font=self.title_font,
-            ).pack(fill="x", padx=16, pady=(16, 12))
+        ctk.CTkLabel(
+            self,
+            text="View Controls",
+            font=self.title_font,
+        ).pack(fill="x", padx=16, pady=(16, 12))
 
-            self._build_orientation()
-            self._build_rotation()
-            self._build_rgb_section()
-            self._build_hsv_hsl_section()
-            self._build_grayscale_section()
-            self._build_binary_section()
-            self._build_depth_section()
-            self._build_thermal_section()
+        self._build_orientation()
+        self._build_rotation()
+        self._build_rgb_section()
+        self._build_hsv_hsl_section()
+        self._build_grayscale_section()
+        self._build_binary_section()
+        self._build_depth_section()
+        self._build_thermal_section()
 
     def _reset_orientation(self):
         self.app.rotation_angle = 0
@@ -64,19 +64,25 @@ class ViewControls(ctk.CTkScrollableFrame):
     def _build_orientation(self):
         frame = ctk.CTkFrame(self, fg_color="transparent")
         frame.pack(fill="x", padx=16, pady=(16, 6))
-        frame.grid_columnconfigure(0, weight=1)
 
         label = ctk.CTkLabel(frame, text="Orientation", font=self.section_font, text_color="gray70")
-        label.grid(row=0, column=0, sticky="w")
+        label.pack(side="left")
 
         reset_btn = ctk.CTkButton(
             frame,
             text="⟳",
             width=28,
             height=28,
-            command=self._reset_orientation
+            command=self._reset_orientation,
+            fg_color="transparent",
+            hover_color="#1a1d23",
+            text_color="white",
+            border_width=0,
+            font=ctk.CTkFont(size=17)
         )
-        reset_btn.grid(row=0, column=1, padx=(4, 0), sticky="e")
+        reset_btn.pack(side="left", padx=(2, 0))
+        reset_btn.bind("<Enter>", lambda e: reset_btn.configure(text_color="#4CC9F0"))
+        reset_btn.bind("<Leave>", lambda e: reset_btn.configure(text_color="white"))
 
         self._two_button_row(
             "Flip Vertical",
@@ -88,19 +94,25 @@ class ViewControls(ctk.CTkScrollableFrame):
     def _build_rotation(self):
         frame = ctk.CTkFrame(self, fg_color="transparent")
         frame.pack(fill="x", padx=16, pady=(16, 6))
-        frame.grid_columnconfigure(0, weight=1)
 
         label = ctk.CTkLabel(frame, text="Rotation", font=self.section_font, text_color="gray70")
-        label.grid(row=0, column=0, sticky="w")
+        label.pack(side="left")
 
         reset_btn = ctk.CTkButton(
             frame,
             text="⟳",
             width=28,
             height=28,
-            command=self._reset_orientation
+            command=self._reset_orientation,
+            fg_color="transparent",
+            hover_color="#1a1d23",
+            text_color="white",
+            border_width=0,
+            font=ctk.CTkFont(size=17)
         )
-        reset_btn.grid(row=0, column=1, padx=(4, 0), sticky="e")
+        reset_btn.pack(side="left", padx=(2, 0))
+        reset_btn.bind("<Enter>", lambda e: reset_btn.configure(text_color="#4CC9F0"))
+        reset_btn.bind("<Leave>", lambda e: reset_btn.configure(text_color="white"))
 
         self._two_button_row(
             "Rotate CCW",
@@ -178,12 +190,12 @@ class ViewControls(ctk.CTkScrollableFrame):
         ).pack(fill="x", padx=16, pady=(0, 4))
 
     def _build_binary_section(self):
-        self._section_label("Binary Threshold")
+        self._section_label("Thresholding")
 
         ctk.CTkButton(
             self,
             text="Threshold Settings",
-            command=self.app.open_binary_threshold_settings,
+            command=self.app.open_threshold_settings,
             font=self.button_font,
             fg_color="#374151",
             hover_color="#4b5563",

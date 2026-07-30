@@ -45,7 +45,6 @@ NOTICE_COLORS = {
     "error": "#f87171",
 }
 
-
 class MainApp(ctk.CTkFrame):
     def __init__(self, master, settings):
         super().__init__(master, fg_color="transparent")
@@ -79,8 +78,11 @@ class MainApp(ctk.CTkFrame):
         self.rotation_angle = 0
         self.display_transform = True
         self.view_mode = "rgb"
-        self.binary_min = 0
-        self.binary_max = 255
+        self.threshold_method = None  # "binary" | "otsu" | "adaptive"
+        self.binary_thresh, self.binary_maxval = 127, 255
+        self.otsu_maxval, self.otsu_invert = 255, False
+        self.adaptive_method = "mean"  # "mean" | "gaussian"
+        self.adaptive_maxval, self.adaptive_block_size, self.adaptive_c = 255, 11, 2
         self.hsv_h_min = 0
         self.hsv_h_max = 179
         self.hsv_s_min = 0
@@ -576,22 +578,12 @@ class MainApp(ctk.CTkFrame):
 
     # ----------------------------------------------------------- mouse
     def _on_click(self, event):
-
         if self.current_frame is None:
             return
-
         display_x = int(event.x / self.display_scale)
         display_y = int(event.y / self.display_scale)
-
         raw_h, raw_w = self.current_frame.shape[:2]
-
-        raw_x, raw_y = self._inverse_transform_point(
-            display_x,
-            display_y,
-            raw_w,
-            raw_h,
-        )
-
+        raw_x, raw_y = self._inverse_transform_point(display_x, display_y, raw_w, raw_h)
         self.mouse_x = raw_x
         self.mouse_y = raw_y
 
@@ -699,18 +691,17 @@ class MainApp(ctk.CTkFrame):
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             image = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
-        elif self.view_mode == "binary":
-
+        elif self.view_mode == "threshold":
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-            _, binary = cv2.threshold(
-                gray,
-                self.binary_min,
-                self.binary_max,
-                cv2.THRESH_BINARY
-            )
-
-            image = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+            if self.threshold_method == "otsu":
+                flag = cv2.THRESH_BINARY_INV if self.otsu_invert else cv2.THRESH_BINARY
+                _, result = cv2.threshold(gray, 0, self.otsu_maxval, flag + cv2.THRESH_OTSU)
+            elif self.threshold_method == "adaptive":
+                method_flag = cv2.ADAPTIVE_THRESH_GAUSSIAN_C if self.adaptive_method == "gaussian" else cv2.ADAPTIVE_THRESH_MEAN_C
+                result = cv2.adaptiveThreshold(gray, self.adaptive_maxval, method_flag, cv2.THRESH_BINARY, self.adaptive_block_size, self.adaptive_c)
+            else:
+                _, result = cv2.threshold(gray, self.binary_thresh, self.binary_maxval, cv2.THRESH_BINARY)
+            image = cv2.cvtColor(result, cv2.COLOR_GRAY2BGR)
 
         elif self.view_mode == "hsv":
 
@@ -753,27 +744,18 @@ class MainApp(ctk.CTkFrame):
             image = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
 
         elif self.view_mode == "depth":
-            if (
-                self.camera_source is not None
-                and getattr(self.camera_source, "has_depth", False)
-            ):
+            if self.camera_source is not None and getattr(self.camera_source, "has_depth", False):
                 pass
             else:
                 self.view_mode = "rgb"
-                self._show_notice(
-                    "No depth camera detected. Showing RGB stream.",
-                    "error"
-                )
+                self._show_notice("No depth camera detected. Showing RGB stream.", "error")
 
         elif self.view_mode == "thermal":
             if self.has_thermal:
                 pass
             else:
                 self.view_mode = "rgb"
-                self._show_notice(
-                    "No thermal camera detected. Showing RGB stream.",
-                    "error"
-                )
+                self._show_notice("No thermal camera detected. Showing RGB stream.", "error")
 
         return image
 
@@ -834,23 +816,15 @@ class MainApp(ctk.CTkFrame):
         return x, y
 
     def _transform_box(self, x1, y1, x2, y2, width, height):
-
         corners = [
             self._transform_point(x1, y1, width, height),
             self._transform_point(x2, y1, width, height),
             self._transform_point(x1, y2, width, height),
             self._transform_point(x2, y2, width, height),
         ]
-
         xs = [p[0] for p in corners]
         ys = [p[1] for p in corners]
-
-        return (
-            min(xs),
-            min(ys),
-            max(xs),
-            max(ys),
-        )
+        return min(xs), min(ys), max(xs), max(ys)
 
     def _compute_axis_y(self, cy, h):
         """Row the horizontal crosshair line should be drawn on, in the
@@ -903,10 +877,7 @@ class MainApp(ctk.CTkFrame):
                 ocx, ocy = (x1 + x2) // 2, (y1 + y2) // 2
                 plan["centroids"].append((ocx, ocy))
                 if i == 0:
-                    plan["primary_target"] = (
-                        ocx,
-                        ocy,
-                    )  # first detection drives line/text/nozzle
+                    plan["primary_target"] = (ocx, ocy)  # first detection drives line/text/nozzle
         else:
             if self.mouse_clicked:
                 mx, my = self.mouse_x, self.mouse_y
@@ -921,24 +892,15 @@ class MainApp(ctk.CTkFrame):
 
         if self.camera_source.has_depth and depth_frame is not None:
             if PRIVATE_MODULE_AVAILABLE:
-                arduino_conn = (
-                    self.arduino.connection
-                    if (self.arduino and self.arduino.is_connected)
-                    else None
-                )
-                result = compute_target(
-                    self.camera_source, depth_frame, tx, ty, self.nozzle, arduino_conn
-                )
+                arduino_conn = self.arduino.connection if (self.arduino and self.arduino.is_connected) else None
+                result = compute_target(self.camera_source, depth_frame, tx, ty, self.nozzle, arduino_conn)
                 if result is None:
                     plan["target_style"] = "error"
                 else:
                     plan["target_style"] = "ok"
                     plan["text_lines"] = [
                         (f"Diag Dist: {result['diag']:.3f} m", (0, 255, 0)),
-                        (
-                            f"Target Ang: {result['angle']:.1f} deg ({result['direction']})",
-                            (0, 255, 0),
-                        ),
+                        (f"Target Ang: {result['angle']:.1f} deg ({result['direction']})", (0, 255, 0)),
                         (f"Steps to Move: {result['steps']}", (0, 255, 0)),
                         (f"Nozzle At: {result['nozzle_angle']:.1f} deg", (0, 255, 0)),
                     ]
@@ -951,9 +913,7 @@ class MainApp(ctk.CTkFrame):
 
         return plan
 
-    def _draw_target_lines(
-        self, image, plan, s_cx, s_axis_y, s_tx, s_ty, scale, color=None
-    ):
+    def _draw_target_lines(self, image, plan, s_cx, s_axis_y, s_tx, s_ty, scale, color=None):
         """Draws one diagonal line (in the existing style) per detected
         box, pointing at that box's own centroid - not just at the first
         detection's. Falls back to a single line to the click/primary
@@ -961,49 +921,15 @@ class MainApp(ctk.CTkFrame):
         if plan["boxes"]:
             for box, centroid in zip(plan["boxes"], plan["centroids"]):
                 x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
-
-                tx1, ty1, tx2, ty2 = self._transform_box(
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    self.raw_width,
-                    self.raw_height,
-                )
-
-                sbox = (
-                    int(tx1 * scale),
-                    int(ty1 * scale),
-                    int(tx2 * scale),
-                    int(ty2 * scale),
-                )
-
+                tx1, ty1, tx2, ty2 = self._transform_box(x1, y1, x2, y2, self.raw_width, self.raw_height)
+                sbox = (int(tx1 * scale), int(ty1 * scale), int(tx2 * scale), int(ty2 * scale))
                 ocx, ocy = centroid
-
-                tocx, tocy = self._transform_point(
-                    ocx,
-                    ocy,
-                    self.raw_width,
-                    self.raw_height,
-                )
-
+                tocx, tocy = self._transform_point(ocx, ocy, self.raw_width, self.raw_height)
                 s_ocx = int(tocx * scale)
                 s_ocy = int(tocy * scale)
-
-                overlay.draw_click_marker(
-                    image,
-                    s_cx,
-                    s_axis_y,
-                    s_ocx,
-                    s_ocy,
-                    box=sbox,
-                    color=color,
-                    scale=scale,
-                )
+                overlay.draw_click_marker(image, s_cx, s_axis_y, s_ocx, s_ocy, box=sbox, color=color, scale=scale)
         else:
-            overlay.draw_click_marker(
-                image, s_cx, s_axis_y, s_tx, s_ty, color=color, scale=scale
-            )
+            overlay.draw_click_marker(image, s_cx, s_axis_y, s_tx, s_ty, color=color, scale=scale)
 
     def _apply_render_plan(self, image, plan, scale=1.0, mode="full"):
         """Pure drawing - safe to call more than once per frame with the
@@ -1017,94 +943,49 @@ class MainApp(ctk.CTkFrame):
             line, no text - for the "Screenshot (Boxes/Clicks Only)" button.
         """
         cx, cy = plan["center"]
-
         img_w = self.raw_width
         img_h = self.raw_height
-
-        tx, ty = self._transform_point(
-            cx,
-            cy,
-            img_w,
-            img_h,
-        )
-
+        tx, ty = self._transform_point(cx, cy, img_w, img_h)
         s_cx = int(tx * scale)
         s_cy = int(ty * scale)
 
         axis_y = plan.get("axis_y", cy)
 
-        _, axis_ty = self._transform_point(
-            cx,
-            axis_y,
-            img_w,
-            img_h,
-        )
+        axis_tx, axis_ty = self._transform_point(cx, axis_y, img_w, img_h)
 
-        s_axis_y = int(axis_ty * scale)
+        # At 0/180 rotation the raw horizontal axis line stays horizontal on
+        # screen, so the slider-driven row lives in the transformed Y
+        # component (axis_ty) and the vertical crosshair line stays fixed
+        # at the true center column (s_cx). At 90/270 rotation the axes
+        # swap: that same raw line is now drawn as a VERTICAL line, so the
+        # slider-driven column lives in the transformed X component
+        # (axis_tx) instead, and the fixed line becomes horizontal at the
+        # true center row (s_cy). Using the wrong component is exactly why
+        # the slider previously had no visible effect at 90/270.
+        if self.rotation_angle in (90, 270):
+            s_axis_col = int(axis_tx * scale)
+            s_axis_row = s_cy
+        else:
+            s_axis_col = s_cx
+            s_axis_row = int(axis_ty * scale)
 
         if mode == "boxes_only":
             if plan["boxes"]:
                 for x1, y1, x2, y2, label, conf in plan["boxes"]:
-
-                    tx1, ty1, tx2, ty2 = self._transform_box(
-                        x1,
-                        y1,
-                        x2,
-                        y2,
-                        img_w,
-                        img_h,
-                    )
-
-                    sbox = (
-                        int(tx1 * scale),
-                        int(ty1 * scale),
-                        int(tx2 * scale),
-                        int(ty2 * scale),
-                    )
-
-                    overlay.draw_detection_box(
-                        image,
-                        sbox,
-                        label,
-                        conf,
-                        scale=scale,
-                    )
+                    tx1, ty1, tx2, ty2 = self._transform_box(x1, y1, x2, y2, img_w, img_h)
+                    sbox = (int(tx1 * scale), int(ty1 * scale), int(tx2 * scale), int(ty2 * scale))
+                    overlay.draw_detection_box(image, sbox, label, conf, scale=scale)
                 for ocx, ocy in plan["centroids"]:
-
-                    tx, ty = self._transform_point(
-                        ocx,
-                        ocy,
-                        img_w,
-                        img_h,
-                    )
-
-                    overlay.draw_centroid_marker(
-                        image,
-                        int(tx * scale),
-                        int(ty * scale),
-                        scale=scale,
-                    )
+                    tx, ty = self._transform_point(ocx, ocy, img_w, img_h)
+                    overlay.draw_centroid_marker(image, int(tx * scale), int(ty * scale), scale=scale)
             elif plan["primary_target"] is not None:
-
                 tx, ty = plan["primary_target"]
-
-                ttx, tty = self._transform_point(
-                    tx,
-                    ty,
-                    img_w,
-                    img_h,
-                )
-
-                overlay.draw_centroid_marker(
-                    image,
-                    int(ttx * scale),
-                    int(tty * scale),
-                    scale=scale,
-                )
+                ttx, tty = self._transform_point(tx, ty, img_w, img_h)
+                overlay.draw_centroid_marker(image, int(ttx * scale), int(tty * scale), scale=scale)
             return
 
-        overlay.draw_axes(image, s_cx, s_axis_y, thickness=max(1, round(scale)))
-        if s_axis_y != s_cy:
+        overlay.draw_axes(image, s_axis_col, s_axis_row, thickness=max(1, round(scale)))
+        if s_axis_col != s_cx or s_axis_row != s_cy:
             # X-Axis slider has shifted the crosshair - show where the
             # true, unmoved center still is, in a distinct color
             overlay.draw_fixed_center_marker(image, s_cx, s_cy, scale=scale)
@@ -1115,129 +996,55 @@ class MainApp(ctk.CTkFrame):
         diagonal_on = bool(self.settings.get("diagonal_distance_on"))
 
         tx, ty = plan["primary_target"]
-
-        ttx, tty = self._transform_point(
-            tx,
-            ty,
-            img_w,
-            img_h,
-        )
-
+        ttx, tty = self._transform_point(tx, ty, img_w, img_h)
         s_tx = int(ttx * scale)
         s_ty = int(tty * scale)
 
         if plan["target_style"] == "error":
             if diagonal_on:
-                self._draw_target_lines(
-                    image, plan, s_cx, s_axis_y, s_tx, s_ty, scale, color=(0, 0, 255)
-                )
-                cv2.putText(
-                    image,
-                    "No Depth Data",
-                    (int(20 * scale), int(40 * scale)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6 * scale,
-                    (0, 0, 255),
-                    max(1, round(2 * scale)),
-                    cv2.LINE_AA,
-                )
+                self._draw_target_lines(image, plan, s_axis_col, s_axis_row, s_tx, s_ty, scale, color=(0, 0, 255))
+                cv2.putText(image, "No Depth Data", (int(20 * scale), int(40 * scale)), cv2.FONT_HERSHEY_SIMPLEX, 0.6 * scale, (0, 0, 255), max(1, round(2 * scale)), cv2.LINE_AA)
         elif plan["target_style"] == "unavailable":
             if diagonal_on:
-                self._draw_target_lines(
-                    image, plan, s_cx, s_axis_y, s_tx, s_ty, scale, color=(0, 0, 255)
-                )
-                cv2.putText(
-                    image,
-                    "Depth targeting module not available",
-                    (int(20 * scale), int(40 * scale)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5 * scale,
-                    (0, 0, 255),
-                    max(1, round(2 * scale)),
-                    cv2.LINE_AA,
-                )
+                self._draw_target_lines(image, plan, s_axis_col, s_axis_row, s_tx, s_ty, scale, color=(0, 0, 255))
+                cv2.putText(image, "Depth targeting module not available", (int(20 * scale), int(40 * scale)), cv2.FONT_HERSHEY_SIMPLEX, 0.5 * scale, (0, 0, 255), max(1, round(2 * scale)), cv2.LINE_AA)
         else:  # "ok"
             if diagonal_on:
-                self._draw_target_lines(image, plan, s_cx, s_axis_y, s_tx, s_ty, scale)
+                self._draw_target_lines(image, plan, s_axis_col, s_axis_row, s_tx, s_ty, scale)
             elif not plan["boxes"]:
                 # no line, but still show the click point itself (a
                 # detection's own centroid dot is drawn below regardless)
                 overlay.draw_centroid_marker(image, s_tx, s_ty, scale=scale)
 
             for x1, y1, x2, y2, label, conf in plan["boxes"]:
-
-                tx1, ty1, tx2, ty2 = self._transform_box(
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    img_w,
-                    img_h,
-                )
-
-                sbox = (
-                    int(tx1 * scale),
-                    int(ty1 * scale),
-                    int(tx2 * scale),
-                    int(ty2 * scale),
-                )
-
-                overlay.draw_detection_box(
-                    image,
-                    sbox,
-                    label,
-                    conf,
-                    scale=scale,
-                )
+                tx1, ty1, tx2, ty2 = self._transform_box(x1, y1, x2, y2, img_w, img_h)
+                sbox = (int(tx1 * scale), int(ty1 * scale), int(tx2 * scale), int(ty2 * scale))
+                overlay.draw_detection_box(image, sbox, label, conf, scale=scale)
 
             for ocx, ocy in plan["centroids"]:
-
-                tx, ty = self._transform_point(
-                    ocx,
-                    ocy,
-                    img_w,
-                    img_h,
-                )
-
-                overlay.draw_centroid_marker(
-                    image,
-                    int(tx * scale),
-                    int(ty * scale),
-                    scale=scale,
-                )
+                tx, ty = self._transform_point(ocx, ocy, img_w, img_h)
+                overlay.draw_centroid_marker(image, int(tx * scale), int(ty * scale), scale=scale)
 
             if diagonal_on:
                 overlay.draw_text_lines(image, plan["text_lines"], scale=scale)
 
     def flip_vertical(self):
         self.flip_vertical_enabled = not self.flip_vertical_enabled
-
         state = "ON" if self.flip_vertical_enabled else "OFF"
-
         self._show_notice(f"Vertical Flip : {state}", "ok")
 
     def flip_horizontal(self):
         self.flip_horizontal_enabled = not self.flip_horizontal_enabled
-
         state = "ON" if self.flip_horizontal_enabled else "OFF"
-
         self._show_notice(f"Horizontal Flip : {state}", "ok")
 
     def rotate_cw(self):
         self.rotation_angle = (self.rotation_angle + 90) % 360
-
-        self._show_notice(
-            f"Rotation : {self.rotation_angle}°",
-            "ok",
-        )
+        self._show_notice(f"Rotation : {self.rotation_angle}°", "ok")
 
     def rotate_ccw(self):
         self.rotation_angle = (self.rotation_angle - 90) % 360
-
-        self._show_notice(
-            f"Rotation : {self.rotation_angle}°",
-            "ok",
-        )
+        self._show_notice(f"Rotation : {self.rotation_angle}°", "ok")
 
     # ------------------------------------------------------------ close
     def on_close(self):
@@ -1272,173 +1079,150 @@ class MainApp(ctk.CTkFrame):
     def show_thermal_channel(self):
         self.view_mode = "thermal"
 
-    def open_binary_threshold_settings(self):
-        self.view_mode = "binary"
+    # --------------------------------------------------------- window utils
+    def _open_singleton_window(self, attr, builder):
+        """Reuses an already-open Toplevel instead of stacking duplicates -
+        repeated clicks on the same sidebar button just refocus whatever
+        that button already opened, instead of piling up copies of it."""
+        win = getattr(self, attr, None)
+        if win is not None and win.winfo_exists():
+            win.lift()
+            win.focus_force()
+            return win
+        win = builder()
+        setattr(self, attr, win)
+        return win
 
-        self.binary_window = ctk.CTkToplevel(self)
+    def _labeled_slider(self, parent, text, minimum, maximum, current, on_change, steps=None, pady=(10, 2)):
+        """One slider row with its live value shown at the far right of its
+        title - so the current number is always visible, not just implied
+        by the handle's position."""
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", padx=20, pady=pady)
+        row.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(row, text=text, anchor="w").grid(row=0, column=0, sticky="w")
+        value_label = ctk.CTkLabel(row, text=str(int(current)), width=44, anchor="e", font=ctk.CTkFont(weight="bold"), text_color="#4CC9F0")
+        value_label.grid(row=0, column=1, sticky="e")
 
-        self.binary_window.title("Binary Threshold")
+        def _apply(value):
+            on_change(value)
+            value_label.configure(text=str(int(round(float(value)))))
 
-        self.binary_window.geometry("380x220")
+        slider = ctk.CTkSlider(parent, from_=minimum, to=maximum, number_of_steps=steps or max(1, int(maximum - minimum)), command=_apply)
+        slider.set(current)
+        slider.pack(fill="x", padx=20, pady=(0, 4))
+        return slider
 
-        self.binary_window.resizable(False, False)
+    # ---------------------------------------------------------- thresholding
+    def open_threshold_settings(self):
+        """"Thresholding" now offers a pick of the 3 techniques used
+        worldwide in image processing/computer vision - simple binary,
+        Otsu's automatic method, and local adaptive thresholding - before
+        opening that specific method's own configuration window."""
+        def build():
+            picker = ctk.CTkToplevel(self)
+            picker.title("Select Thresholding Method")
+            picker.geometry("340x260")
+            picker.resizable(False, False)
+            ctk.CTkLabel(picker, text="Choose a thresholding technique", font=ctk.CTkFont(size=15, weight="bold")).pack(padx=16, pady=(20, 12))
+            methods = [("Binary Thresholding", self._open_binary_threshold_window), ("Otsu's Method", self._open_otsu_window), ("Adaptive Thresholding", self._open_adaptive_window)]
+            for label, opener in methods:
+                ctk.CTkButton(picker, text=label, command=lambda o=opener, p=picker: (p.destroy(), o())).pack(fill="x", padx=20, pady=6)
+            return picker
+        self._open_singleton_window("threshold_picker_window", build)
 
-        ctk.CTkLabel(
-            self.binary_window,
-            text="Minimum Threshold"
-        ).pack(pady=(15, 2))
+    def _open_binary_threshold_window(self):
+        self.view_mode, self.threshold_method = "threshold", "binary"
 
-        min_slider = ctk.CTkSlider(
-            self.binary_window,
-            from_=0,
-            to=255,
-            number_of_steps=255,
-            command=self._binary_min_changed
-        )
+        def build():
+            win = ctk.CTkToplevel(self)
+            win.title("Thresholding - Binary")
+            win.geometry("380x260")
+            win.resizable(False, False)
+            self._labeled_slider(win, "Threshold Value", 0, 255, self.binary_thresh, lambda v: setattr(self, "binary_thresh", int(v)), pady=(20, 2))
+            self._labeled_slider(win, "Maximum Value", 0, 255, self.binary_maxval, lambda v: setattr(self, "binary_maxval", int(v)))
+            return win
+        self._open_singleton_window("binary_window", build)
 
-        min_slider.set(self.binary_min)
+    def _open_otsu_window(self):
+        self.view_mode, self.threshold_method = "threshold", "otsu"
 
-        min_slider.pack(fill="x", padx=20)
+        def build():
+            win = ctk.CTkToplevel(self)
+            win.title("Thresholding - Otsu's Method")
+            win.geometry("380x240")
+            win.resizable(False, False)
+            ctk.CTkLabel(win, text="Otsu's method computes the split point automatically from the "
+                         "image histogram - only the output level is configurable here.",
+                         font=ctk.CTkFont(size=12), text_color="gray60", justify="left", wraplength=340).pack(padx=20, pady=(18, 4))
+            self._labeled_slider(win, "Maximum Value", 0, 255, self.otsu_maxval, lambda v: setattr(self, "otsu_maxval", int(v)))
+            invert_var = tk.BooleanVar(value=self.otsu_invert)
+            ctk.CTkSwitch(win, text="Invert (dark objects on light background)", variable=invert_var, onvalue=True, offvalue=False,
+                          command=lambda: setattr(self, "otsu_invert", bool(invert_var.get()))).pack(anchor="w", padx=20, pady=(8, 4))
+            return win
+        self._open_singleton_window("otsu_window", build)
 
-        ctk.CTkLabel(
-            self.binary_window,
-            text="Maximum Threshold"
-        ).pack(pady=(15, 2))
+    def _open_adaptive_window(self):
+        self.view_mode, self.threshold_method = "threshold", "adaptive"
 
-        max_slider = ctk.CTkSlider(
-            self.binary_window,
-            from_=0,
-            to=255,
-            number_of_steps=255,
-            command=self._binary_max_changed
-        )
+        def build():
+            win = ctk.CTkToplevel(self)
+            win.title("Thresholding - Adaptive")
+            win.geometry("400x400")
+            win.resizable(False, False)
+            ctk.CTkLabel(win, text="Local Method", anchor="w").pack(fill="x", padx=20, pady=(18, 2))
+            method_var = tk.StringVar(value=self.adaptive_method)
+            ctk.CTkSegmentedButton(win, values=["mean", "gaussian"], variable=method_var,
+                                    command=lambda v: setattr(self, "adaptive_method", v)).pack(fill="x", padx=20, pady=(0, 8))
+            self._labeled_slider(win, "Maximum Value", 0, 255, self.adaptive_maxval, lambda v: setattr(self, "adaptive_maxval", int(v)))
+            self._labeled_slider(win, "Block Size (odd, neighborhood width)", 3, 51, self.adaptive_block_size, self._adaptive_block_changed, steps=24)
+            self._labeled_slider(win, "C (constant subtracted from mean)", -50, 50, self.adaptive_c, lambda v: setattr(self, "adaptive_c", int(v)))
+            return win
+        self._open_singleton_window("adaptive_window", build)
 
-        max_slider.set(self.binary_max)
+    def _adaptive_block_changed(self, value):
+        block = int(round(float(value)))
+        self.adaptive_block_size = block if block % 2 == 1 else block + 1
 
-        max_slider.pack(fill="x", padx=20)
-
-    def _binary_min_changed(self, value):
-        self.binary_min = int(value)
-
-    def _binary_max_changed(self, value):
-        self.binary_max = int(value)
-
+    # ------------------------------------------------------------ HSV / HSL
     def open_hsv_settings(self):
-
         self.view_mode = "hsv"
 
-        self.hsv_window = ctk.CTkToplevel(self)
-
-        self.hsv_window.title("HSV Filter")
-
-        self.hsv_window.geometry("420x520")
-
-        self.hsv_window.resizable(False, False)
-
-        sliders = [
-            ("Hue Minimum", 0, 179, self.hsv_h_min, self._hsv_h_min_changed),
-            ("Hue Maximum", 0, 179, self.hsv_h_max, self._hsv_h_max_changed),
-
-            ("Saturation Minimum", 0, 255, self.hsv_s_min, self._hsv_s_min_changed),
-            ("Saturation Maximum", 0, 255, self.hsv_s_max, self._hsv_s_max_changed),
-
-            ("Value Minimum", 0, 255, self.hsv_v_min, self._hsv_v_min_changed),
-            ("Value Maximum", 0, 255, self.hsv_v_max, self._hsv_v_max_changed),
-        ]
-
-        for text, minimum, maximum, current, callback in sliders:
-
-            ctk.CTkLabel(
-                self.hsv_window,
-                text=text
-            ).pack(pady=(10,2))
-
-            slider = ctk.CTkSlider(
-                self.hsv_window,
-                from_=minimum,
-                to=maximum,
-                number_of_steps=maximum-minimum,
-                command=callback
-            )
-
-            slider.set(current)
-
-            slider.pack(fill="x", padx=20)
-
-    def _hsv_h_min_changed(self, value):
-        self.hsv_h_min = int(value)
-
-    def _hsv_h_max_changed(self, value):
-        self.hsv_h_max = int(value)
-
-    def _hsv_s_min_changed(self, value):
-        self.hsv_s_min = int(value)
-
-    def _hsv_s_max_changed(self, value):
-        self.hsv_s_max = int(value)
-
-    def _hsv_v_min_changed(self, value):
-        self.hsv_v_min = int(value)
-
-    def _hsv_v_max_changed(self, value):
-        self.hsv_v_max = int(value)
+        def build():
+            win = ctk.CTkToplevel(self)
+            win.title("HSV Filter")
+            win.geometry("420x560")
+            win.resizable(False, False)
+            sliders = [
+                ("Hue Minimum", 0, 179, self.hsv_h_min, lambda v: setattr(self, "hsv_h_min", int(v))),
+                ("Hue Maximum", 0, 179, self.hsv_h_max, lambda v: setattr(self, "hsv_h_max", int(v))),
+                ("Saturation Minimum", 0, 255, self.hsv_s_min, lambda v: setattr(self, "hsv_s_min", int(v))),
+                ("Saturation Maximum", 0, 255, self.hsv_s_max, lambda v: setattr(self, "hsv_s_max", int(v))),
+                ("Value Minimum", 0, 255, self.hsv_v_min, lambda v: setattr(self, "hsv_v_min", int(v))),
+                ("Value Maximum", 0, 255, self.hsv_v_max, lambda v: setattr(self, "hsv_v_max", int(v))),
+            ]
+            for text, minimum, maximum, current, callback in sliders:
+                self._labeled_slider(win, text, minimum, maximum, current, callback)
+            return win
+        self._open_singleton_window("hsv_window", build)
 
     def open_hsl_settings(self):
-
         self.view_mode = "hsl"
 
-        self.hsl_window = ctk.CTkToplevel(self)
-
-        self.hsl_window.title("HSL Filter")
-
-        self.hsl_window.geometry("420x520")
-
-        self.hsl_window.resizable(False, False)
-
-        sliders = [
-            ("Hue Minimum", 0, 179, self.hsl_h_min, self._hsl_h_min_changed),
-            ("Hue Maximum", 0, 179, self.hsl_h_max, self._hsl_h_max_changed),
-
-            ("Lightness Minimum", 0, 255, self.hsl_l_min, self._hsl_l_min_changed),
-            ("Lightness Maximum", 0, 255, self.hsl_l_max, self._hsl_l_max_changed),
-
-            ("Saturation Minimum", 0, 255, self.hsl_s_min, self._hsl_s_min_changed),
-            ("Saturation Maximum", 0, 255, self.hsl_s_max, self._hsl_s_max_changed),
-        ]
-
-        for text, minimum, maximum, current, callback in sliders:
-
-            ctk.CTkLabel(
-                self.hsl_window,
-                text=text
-            ).pack(pady=(10, 2))
-
-            slider = ctk.CTkSlider(
-                self.hsl_window,
-                from_=minimum,
-                to=maximum,
-                number_of_steps=maximum - minimum,
-                command=callback
-            )
-
-            slider.set(current)
-
-            slider.pack(fill="x", padx=20)
-
-    def _hsl_h_min_changed(self, value):
-        self.hsl_h_min = int(value)
-
-    def _hsl_h_max_changed(self, value):
-        self.hsl_h_max = int(value)
-
-    def _hsl_l_min_changed(self, value):
-        self.hsl_l_min = int(value)
-
-    def _hsl_l_max_changed(self, value):
-        self.hsl_l_max = int(value)
-
-    def _hsl_s_min_changed(self, value):
-        self.hsl_s_min = int(value)
-
-    def _hsl_s_max_changed(self, value):
-        self.hsl_s_max = int(value)
+        def build():
+            win = ctk.CTkToplevel(self)
+            win.title("HSL Filter")
+            win.geometry("420x560")
+            win.resizable(False, False)
+            sliders = [
+                ("Hue Minimum", 0, 179, self.hsl_h_min, lambda v: setattr(self, "hsl_h_min", int(v))),
+                ("Hue Maximum", 0, 179, self.hsl_h_max, lambda v: setattr(self, "hsl_h_max", int(v))),
+                ("Lightness Minimum", 0, 255, self.hsl_l_min, lambda v: setattr(self, "hsl_l_min", int(v))),
+                ("Lightness Maximum", 0, 255, self.hsl_l_max, lambda v: setattr(self, "hsl_l_max", int(v))),
+                ("Saturation Minimum", 0, 255, self.hsl_s_min, lambda v: setattr(self, "hsl_s_min", int(v))),
+                ("Saturation Maximum", 0, 255, self.hsl_s_max, lambda v: setattr(self, "hsl_s_max", int(v))),
+            ]
+            for text, minimum, maximum, current, callback in sliders:
+                self._labeled_slider(win, text, minimum, maximum, current, callback)
+            return win
+        self._open_singleton_window("hsl_window", build)
