@@ -63,6 +63,8 @@ class MainApp(ctk.CTkFrame):
         self.recorder = Recorder()
         self.current_frame = None
         self._raw_frame = None  # clean frame (no overlay), refreshed every loop
+        self.fps = 0.0
+        self._last_frame_time = None
         self._last_plan = (
             None  # render plan for the same frame, for on-demand overlay variants
         )
@@ -597,6 +599,15 @@ class MainApp(ctk.CTkFrame):
         raw_image, depth_frame, cx, cy = self.camera_source.read()
         self.raw_width = raw_image.shape[1]
         self.raw_height = raw_image.shape[0]
+
+        now = time.perf_counter()
+        if self._last_frame_time is not None:
+            dt = now - self._last_frame_time
+            if dt > 0:
+                inst_fps = 1.0 / dt
+                self.fps = inst_fps if self.fps == 0 else (self.fps * 0.9 + inst_fps * 0.1)
+        self._last_frame_time = now
+
         if raw_image is not None:
             # Compute everything ONCE - detection inference, nozzle math,
             # and any Arduino send all happen exactly one time per frame,
@@ -937,10 +948,12 @@ class MainApp(ctk.CTkFrame):
 
         `mode` controls which layers get drawn:
           - "full": everything, gated by the Diagonal Distance setting -
-            this is what's shown on screen and recorded to video.
+            this is what's shown on screen and recorded to video. The FPS
+            viewer (if on) always draws here regardless of that gating.
           - "boxes_only": detection boxes/labels (or the click dot, in
             click-mode) and nothing else - no crosshair, no diagonal
-            line, no text - for the "Screenshot (Boxes/Clicks Only)" button.
+            line, no text, no FPS viewer - for the "Screenshot
+            (Boxes/Clicks Only)" button.
         """
         cx, cy = plan["center"]
         img_w = self.raw_width
@@ -989,6 +1002,12 @@ class MainApp(ctk.CTkFrame):
             # X-Axis slider has shifted the crosshair - show where the
             # true, unmoved center still is, in a distinct color
             overlay.draw_fixed_center_marker(image, s_cx, s_cy, scale=scale)
+
+        # FPS viewer - independent of every other config option/toggle above
+        # (Diagonal Distance, actuation mode, target_style, etc.) and of the
+        # "boxes_only" screenshot variant, which already returned above.
+        if self.settings.get("fps_viewer_on"):
+            overlay.draw_fps(image, self.fps, scale=scale)
 
         if plan["target_style"] is None:
             return
@@ -1124,7 +1143,7 @@ class MainApp(ctk.CTkFrame):
             picker.title("Select Thresholding Method")
             picker.geometry("340x260")
             picker.resizable(False, False)
-            ctk.CTkLabel(picker, text="Choose a thresholding technique", font=ctk.CTkFont(size=15, weight="bold")).pack(padx=16, pady=(20, 12))
+            ctk.CTkLabel(picker, text="Choose a Thresholding Technique", font=ctk.CTkFont(size=15, weight="bold")).pack(padx=16, pady=(20, 12))
             methods = [("Binary Thresholding", self._open_binary_threshold_window), ("Otsu's Method", self._open_otsu_window), ("Adaptive Thresholding", self._open_adaptive_window)]
             for label, opener in methods:
                 ctk.CTkButton(picker, text=label, command=lambda o=opener, p=picker: (p.destroy(), o())).pack(fill="x", padx=20, pady=6)
@@ -1152,12 +1171,11 @@ class MainApp(ctk.CTkFrame):
             win.title("Thresholding - Otsu's Method")
             win.geometry("380x240")
             win.resizable(False, False)
-            ctk.CTkLabel(win, text="Otsu's method computes the split point automatically from the "
-                         "image histogram - only the output level is configurable here.",
+            ctk.CTkLabel(win, text="Otsu's method computes the split point automatically from the image histogram. Only the output level is configurable here.",
                          font=ctk.CTkFont(size=12), text_color="gray60", justify="left", wraplength=340).pack(padx=20, pady=(18, 4))
             self._labeled_slider(win, "Maximum Value", 0, 255, self.otsu_maxval, lambda v: setattr(self, "otsu_maxval", int(v)))
             invert_var = tk.BooleanVar(value=self.otsu_invert)
-            ctk.CTkSwitch(win, text="Invert (dark objects on light background)", variable=invert_var, onvalue=True, offvalue=False,
+            ctk.CTkSwitch(win, text="Invert Intensities", variable=invert_var, onvalue=True, offvalue=False,
                           command=lambda: setattr(self, "otsu_invert", bool(invert_var.get()))).pack(anchor="w", padx=20, pady=(8, 4))
             return win
         self._open_singleton_window("otsu_window", build)
@@ -1172,11 +1190,11 @@ class MainApp(ctk.CTkFrame):
             win.resizable(False, False)
             ctk.CTkLabel(win, text="Local Method", anchor="w").pack(fill="x", padx=20, pady=(18, 2))
             method_var = tk.StringVar(value=self.adaptive_method)
-            ctk.CTkSegmentedButton(win, values=["mean", "gaussian"], variable=method_var,
+            ctk.CTkSegmentedButton(win, values=["Mean", "Gaussian"], variable=method_var,
                                     command=lambda v: setattr(self, "adaptive_method", v)).pack(fill="x", padx=20, pady=(0, 8))
             self._labeled_slider(win, "Maximum Value", 0, 255, self.adaptive_maxval, lambda v: setattr(self, "adaptive_maxval", int(v)))
-            self._labeled_slider(win, "Block Size (odd, neighborhood width)", 3, 51, self.adaptive_block_size, self._adaptive_block_changed, steps=24)
-            self._labeled_slider(win, "C (constant subtracted from mean)", -50, 50, self.adaptive_c, lambda v: setattr(self, "adaptive_c", int(v)))
+            self._labeled_slider(win, "Block Size (Odd, Neighborhood Width)", 3, 51, self.adaptive_block_size, self._adaptive_block_changed, steps=24)
+            self._labeled_slider(win, "C (Constant Subtracted from Mean)", -50, 50, self.adaptive_c, lambda v: setattr(self, "adaptive_c", int(v)))
             return win
         self._open_singleton_window("adaptive_window", build)
 

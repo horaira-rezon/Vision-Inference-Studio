@@ -29,23 +29,17 @@ MODE_OPTIONS = [
     (
         "none",
         "No External Actuation",
-        "Only mouse clicks and detection boxes are shown, with their "
-        "centroids. Nothing below is needed, so the diagonal line, its "
-        "distance readout, and the other options all stay off.",
+        "Only mouse clicks and detection boxes are shown, with their centroids. Nothing below is needed, so the diagonal line, its distance readout, and the other options all stay off.",
     ),
     (
         "external",
         "External Actuation",
-        "Unlocks every option below - the Diagonal Distance toggle, the "
-        "X-Axis line mover, and the Multiple Box Distance Merge section "
-        "all become available.",
+        "Unlocks every option below - the Diagonal Distance toggle, the X-Axis line mover, and the Multiple Box Distance Merge section all become available.",
     ),
     (
         "diagonal_only",
         "Diagonal Distance Only",
-        "No external hardware, but you still need the diagonal line and "
-        "distance readout. Diagonal Distance switches on automatically; "
-        "the rest of the options below stay locked.",
+        "No external hardware, but you still need the diagonal line and distance readout. Diagonal Distance switches on automatically; the rest of the options below stay locked.",
     ),
 ]
 
@@ -74,6 +68,7 @@ class ConfigWindow(ctk.CTkToplevel):
         self._axis_checkboxes = []
         self._wrap_labels = []  # (label, side_padding) - kept in sync with window width
         self._poll_after_id = None
+        self._last_gating_state = None
 
         self._build_ui()
         self._refresh_from_settings()
@@ -147,9 +142,7 @@ class ConfigWindow(ctk.CTkToplevel):
         self.diag_switch.pack(anchor="w")
         diag_desc = ctk.CTkLabel(
             diag_inner,
-            text="Draws the line (and its distance / depth / nozzle text) from the "
-                 "crosshair intersection to the mouse click or box centroid. Off means "
-                 "no line and no overlay text at all.",
+            text="Draws the line from the axis lines intersection to the mouse click or boudning box centroid. OFF means no line and no overlay text at all.",
             font=ctk.CTkFont(size=13), text_color=DESC_COLOR, justify="left", anchor="w",
         )
         diag_desc.pack(anchor="w", pady=(6, 0), fill="x")
@@ -162,7 +155,7 @@ class ConfigWindow(ctk.CTkToplevel):
         axis_inner = ctk.CTkFrame(axis_card, fg_color="transparent")
         axis_inner.pack(fill="x", padx=16, pady=12)
 
-        ctk.CTkLabel(axis_inner, text="Left (down) \u2190\u2192 Right (up)", font=ctk.CTkFont(size=13), text_color="gray70").pack(anchor="w")
+        ctk.CTkLabel(axis_inner, text="Left (Down) - Right (Up)", font=ctk.CTkFont(size=13), text_color="gray70").pack(anchor="w")
         self.axis_slider_var = tk.DoubleVar(value=0.5)
         self.axis_slider = ctk.CTkSlider(
             axis_inner, from_=0.0, to=1.0, variable=self.axis_slider_var,
@@ -170,19 +163,18 @@ class ConfigWindow(ctk.CTkToplevel):
         )
         self.axis_slider.pack(fill="x", pady=(6, 0))
         self._prevent_slider_wheel_hijack(self.axis_slider)
+        self._flush_on_release(self.axis_slider)
 
         axis_desc = ctk.CTkLabel(
             axis_inner,
-            text="Moves the horizontal crosshair line up or down without moving the "
-                 "true camera center. The diagonal line always follows the moving "
-                 "intersection point, not the fixed center.",
+            text="Moves the horizontal crosshair line up or down without moving the true camera center. The diagonal line always follows the moving intersection point, not the fixed center.", 
             font=ctk.CTkFont(size=13), text_color=DESC_COLOR, justify="left", anchor="w",
         )
         axis_desc.pack(anchor="w", pady=(6, 0), fill="x")
         self._register_wrap_label(axis_desc)
 
         # --- 4. Multiple Box Distance Merge (scaffold) ---
-        self._section_title(scroll, "4. Multiple Box Distance Merge")
+        self._section_title(scroll, "4. Multi-Box Decision")
         self.box_card = ctk.CTkFrame(scroll, fg_color=CARD_BG, corner_radius=10, border_width=1, border_color=BORDER)
         self.box_card.pack(fill="x", pady=(2, 4))
         box_inner = ctk.CTkFrame(self.box_card, fg_color="transparent")
@@ -207,6 +199,7 @@ class ConfigWindow(ctk.CTkToplevel):
         )
         self.box_count_slider.pack(side="left", fill="x", expand=True, padx=8)
         self._prevent_slider_wheel_hijack(self.box_count_slider)
+        self._flush_on_release(self.box_count_slider)
 
         self.box_plus_btn = ctk.CTkButton(count_row, text="+", width=32, command=lambda: self._nudge_count(1))
         self.box_plus_btn.pack(side="left")
@@ -216,11 +209,7 @@ class ConfigWindow(ctk.CTkToplevel):
 
         box_desc = ctk.CTkLabel(
             box_inner,
-            text="Sets how many detected boxes are considered together. The axis "
-                 "restriction below applies globally to all of them, not per box. "
-                 "Leave both sub-checkboxes off to cover the whole half. This section "
-                 "is an early scaffold - the actual merge behavior will be built out "
-                 "in a later pass.",
+            text="Sets how many detected boxes are considered together. The axis restriction below applies globally to all of them, not per box. Leave both sub-checkboxes off to cover the whole half.",
             font=ctk.CTkFont(size=13), text_color=DESC_COLOR, justify="left", anchor="w",
         )
         box_desc.pack(anchor="w", pady=(0, 10), fill="x")
@@ -234,6 +223,28 @@ class ConfigWindow(ctk.CTkToplevel):
 
         self._make_axis_group(box_inner, "+Y axis", "pos_y")
         self._make_axis_group(box_inner, "-Y axis", "neg_y")
+
+        # --- FPS Viewer (independent - not gated by anything above, and
+        # not touched by Reset, which only restores the 4 numbered sections) ---
+        self._section_title(scroll, "FPS Viewer")
+        fps_card = ctk.CTkFrame(scroll, fg_color=CARD_BG, corner_radius=10, border_width=1, border_color=BORDER)
+        fps_card.pack(fill="x", pady=(2, 4))
+        fps_inner = ctk.CTkFrame(fps_card, fg_color="transparent")
+        fps_inner.pack(fill="x", padx=16, pady=12)
+
+        self.fps_switch_var = tk.BooleanVar(value=bool(self.settings.get("fps_viewer_on")))
+        self.fps_switch = ctk.CTkSwitch(
+            fps_inner, text="Show FPS viewer", variable=self.fps_switch_var,
+            onvalue=True, offvalue=False, command=self._on_fps_toggle, progress_color=ACCENT,
+        )
+        self.fps_switch.pack(anchor="w")
+        fps_desc = ctk.CTkLabel(
+            fps_inner,
+            text="ON by default, independent of every option above. Shown in the live view and the full-overlay screenshot, but not the clean or boxes/clicks-only screenshot variants.",
+            font=ctk.CTkFont(size=13), text_color=DESC_COLOR, justify="left", anchor="w",
+        )
+        fps_desc.pack(anchor="w", pady=(6, 0), fill="x")
+        self._register_wrap_label(fps_desc)
 
         # --- Save / Reset ---
         footer = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -354,6 +365,26 @@ class ConfigWindow(ctk.CTkToplevel):
             widget.bind("<Button-4>", handler)     # Linux scroll up
             widget.bind("<Button-5>", handler)     # Linux scroll down
 
+    def _flush_on_release(self, slider):
+        """The slider's `command` updates settings in-memory only (see
+        _on_axis_slide/_on_count_slide) so dragging doesn't hit the disk on
+        every tick. This writes the final value once the mouse button is
+        released, so the drag's end result still gets persisted. Uses
+        add="+" so CTkSlider's own release handling (which stops the drag)
+        keeps working - this only adds a second callback, it doesn't
+        replace it."""
+
+        def flush(_event=None):
+            self.settings.save()
+
+        targets = [slider]
+        inner_canvas = getattr(slider, "_canvas", None)
+        if inner_canvas is not None:
+            targets.append(inner_canvas)
+
+        for widget in targets:
+            widget.bind("<ButtonRelease-1>", flush, add="+")
+
     # -------------------------------------------------- dynamic wrapping
     def _register_wrap_label(self, label, side_padding=100):
         self._wrap_labels.append((label, side_padding))
@@ -382,12 +413,16 @@ class ConfigWindow(ctk.CTkToplevel):
         self.settings.set("diagonal_distance_on", bool(self.diag_switch_var.get()))
         self._apply_gating()
 
+    def _on_fps_toggle(self):
+        # Fully independent of mode/gating/draft - just writes straight through
+        self.settings.set("fps_viewer_on", bool(self.fps_switch_var.get()))
+
     def _on_axis_slide(self, value):
-        self.settings.set("x_axis_slider", float(value))
+        self.settings.set("x_axis_slider", float(value), persist=False)
 
     def _on_count_slide(self, value):
         count = int(round(float(value)))
-        self.settings.set("multi_box_count", count)
+        self.settings.set("multi_box_count", count, persist=False)
         self.box_count_label.configure(text=f"{count} box" if count == 1 else f"{count} boxes")
 
     def _nudge_count(self, delta):
@@ -395,6 +430,7 @@ class ConfigWindow(ctk.CTkToplevel):
         count = max(1, min(10, count + delta))
         self.box_count_slider_var.set(count)
         self._on_count_slide(count)
+        self.settings.save()  # single click, not a drag - persist right away
 
     def _save_axis_quadrant(self, group_key, group_on, posx_on, negx_on):
         stored = dict(self.settings.get("axis_quadrants") or {})
@@ -427,6 +463,11 @@ class ConfigWindow(ctk.CTkToplevel):
         diagonal_on = bool(self.settings.get("diagonal_distance_on"))
         has_model = bool(self.has_model_fn())
 
+        state = (mode, diagonal_on, has_model)
+        if state == self._last_gating_state:
+            return
+        self._last_gating_state = state
+
         # highlight the selected mode card
         for key, card in self._mode_cards.items():
             card.configure(fg_color=CARD_BG_SELECTED if key == mode else CARD_BG)
@@ -452,9 +493,9 @@ class ConfigWindow(ctk.CTkToplevel):
         # section 4: multi-box merge - needs "external" + diagonal ON + a model
         box_enabled = mode == "external" and diagonal_on and has_model
         if mode != "external":
-            gate_text = "Requires External Actuation mode"
+            gate_text = "Requires External Actuation Mode"
         elif not diagonal_on:
-            gate_text = "Turn Diagonal Distance ON to use this"
+            gate_text = "Turn Diagonal Distance ON"
         elif not has_model:
             gate_text = "Input Model Weight"
         else:

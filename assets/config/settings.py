@@ -34,6 +34,12 @@ DEFAULT_SETTINGS = {
     # Single global axis restriction (Positive/Negative Y, +X/-X), shared
     # across however many boxes multi_box_count is set to - NOT per box.
     "axis_quadrants": {},
+    # FPS viewer - independent of every other Configuration-window option
+    # above (External Actuation mode, Diagonal Distance, etc.) and of the
+    # Reset button, which only touches the other four sections. On by
+    # default; visible in the live view and the full "Take Screenshot",
+    # but not the clean or boxes-only screenshot variants.
+    "fps_viewer_on": True,
 }
 
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "..", "assets", "settings.json")
@@ -62,6 +68,7 @@ class Settings:
     def get(self, key):
         return self.data.get(key)
 
-    def set(self, key, value):
+    def set(self, key, value, persist=True):
         self.data[key] = value
-        self.save()
+        if persist:
+            self.save()

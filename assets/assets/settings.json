@@ -10,5 +10,6 @@
   "x_axis_slider": 0.5,
   "multi_box_count": 1,
   "axis_quadrants": {},
+  "fps_viewer_on": true,
   "multi_box_quadrants": {}
 }

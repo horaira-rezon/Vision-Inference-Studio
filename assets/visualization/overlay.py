@@ -100,6 +100,22 @@ def draw_centroid_marker(image, cx, cy, color=None, scale=1.0):
     cv2.circle(image, (cx, cy), r, color if color is not None else TARGET_DOT, -1, cv2.LINE_AA)
 
 
+def draw_fps(image, fps, scale=1.0):
+    """Same font, color, and scale-with-resolution behavior as the other
+    streaming-window overlay text (draw_text_lines): green, HERSHEY_SIMPLEX,
+    0.5*scale font size, thickness scaling with it too. Drawn top-right
+    (rather than reusing draw_text_lines' top-left origin) so it never
+    overlaps the Pixel Dist / depth / nozzle text there."""
+    text = f"FPS: {fps:.1f}"
+    font_scale = 0.5 * scale
+    thickness = max(1, round(2 * scale))
+    (tw, _th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+    h, w = image.shape[:2]
+    x = w - tw - int(10 * scale)
+    y = int(24 * scale)
+    cv2.putText(image, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 0), thickness, cv2.LINE_AA)
+
+
 def draw_text_lines(image, lines, origin=(10, 24), gap=None, scale=1.0):
     """lines: list of (text, bgr_color) tuples, stacked top to bottom.
     Font size, thickness, and line spacing all scale with `scale` so text

@@ -23,7 +23,7 @@ class RootController:
 
         self.settings = Settings()
         self.main_app = None
-
+ 
         self.setup_screen = SetupScreen(root, on_local_selected=self.launch_local_app)
         self.setup_screen.pack(fill="both", expand=True)
 
