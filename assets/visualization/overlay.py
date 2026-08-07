@@ -132,11 +132,8 @@ def draw_text_lines(image, lines, origin=(10, 24), gap=None, scale=1.0):
 def draw_detection_box(image, box, label, conf, scale=1.0, track_id=None):
     """Techy corner-bracket style instead of a full rectangle outline, plus
     a filled label pill (like a targeting HUD) instead of plain text.
-    When track_id is given (ByteTrack/BotSORT active), it's appended on
-    the same line as "Class 0.85", e.g. "Class  0.85   ID 3" - extra
-    spaces between the three fields are intentional, giving each a little
-    visual breathing room since cv2 has no real letter/word-spacing
-    control beyond the text content itself."""
+    When track_id is given (ByteTrack/BotSORT active), it's placed before
+    the class name with a space, e.g. "3 weed 0.85"."""
     x1, y1, x2, y2 = box
     color = TECH_ACCENT
     thickness = max(1, round(2 * scale))
@@ -151,9 +148,10 @@ def draw_detection_box(image, box, label, conf, scale=1.0, track_id=None):
         cv2.line(image, (px, py), (px + dx * corner_len, py), color, thickness, cv2.LINE_AA)
         cv2.line(image, (px, py), (px, py + dy * corner_len), color, thickness, cv2.LINE_AA)
 
-    label_text = f"{label}  {conf:.2f}"
     if track_id is not None:
-        label_text += f"   ID {track_id}"
+        label_text = f"{track_id} {label} {conf:.2f}"
+    else:
+        label_text = f"{label} {conf:.2f}"
     font_scale = 0.5 * scale
     (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
     pad = max(3, round(4 * scale))
