@@ -29,11 +29,14 @@ DEFAULT_SETTINGS = {
     # where the diagonal line/its cyan dot originate) up or down without
     # moving the true camera-center dot or any real-world calculation.
     "x_axis_slider": 0.5,
-    # Multiple Box Distance Merge - scaffold only for now (see config_window.py)
-    "multi_box_count": 1,
-    # Single global axis restriction (Positive/Negative Y, +X/-X), shared
-    # across however many boxes multi_box_count is set to - NOT per box.
-    "axis_quadrants": {},
+    # Object Tracking (Configuration window, section 4) - "none" | "bytetrack"
+    # | "botsort". Independent of actuation_mode/diagonal_distance_on.
+    "tracker_mode": "none",
+    # Confidence Threshold (section 5), 0-100. Boxes below this are dropped
+    # by YoloEngine.detect() itself - the SAME filtered list is what gets
+    # drawn in the streaming window AND what's eligible for Arduino
+    # actuation, so this one setting governs both.
+    "confidence_threshold": 50,
     # FPS viewer - independent of every other Configuration-window option
     # above (External Actuation mode, Diagonal Distance, etc.) and of the
     # Reset button, which only touches the other four sections. On by

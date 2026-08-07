@@ -880,11 +880,15 @@ class MainApp(ctk.CTkFrame):
             # draw whatever it most recently finished (may lag a frame or
             # two behind on a slow model, but the video feed itself never
             # freezes waiting on inference).
-            self.detection_worker.submit_frame(image)
+            self.detection_worker.submit_frame(
+                image,
+                tracker=self.settings.get("tracker_mode"),
+                confidence_threshold=(self.settings.get("confidence_threshold") or 0) / 100.0,
+            )
             detections = self.detection_worker.get_latest_detections()
             for i, det in enumerate(detections):
                 x1, y1, x2, y2 = det["box"]
-                plan["boxes"].append((x1, y1, x2, y2, det["label"], det["conf"]))
+                plan["boxes"].append((x1, y1, x2, y2, det["label"], det["conf"], det.get("track_id")))
                 ocx, ocy = (x1 + x2) // 2, (y1 + y2) // 2
                 plan["centroids"].append((ocx, ocy))
                 if i == 0:
@@ -984,10 +988,10 @@ class MainApp(ctk.CTkFrame):
 
         if mode == "boxes_only":
             if plan["boxes"]:
-                for x1, y1, x2, y2, label, conf in plan["boxes"]:
+                for x1, y1, x2, y2, label, conf, track_id in plan["boxes"]:
                     tx1, ty1, tx2, ty2 = self._transform_box(x1, y1, x2, y2, img_w, img_h)
                     sbox = (int(tx1 * scale), int(ty1 * scale), int(tx2 * scale), int(ty2 * scale))
-                    overlay.draw_detection_box(image, sbox, label, conf, scale=scale)
+                    overlay.draw_detection_box(image, sbox, label, conf, scale=scale, track_id=track_id)
                 for ocx, ocy in plan["centroids"]:
                     tx, ty = self._transform_point(ocx, ocy, img_w, img_h)
                     overlay.draw_centroid_marker(image, int(tx * scale), int(ty * scale), scale=scale)
@@ -1035,10 +1039,10 @@ class MainApp(ctk.CTkFrame):
                 # detection's own centroid dot is drawn below regardless)
                 overlay.draw_centroid_marker(image, s_tx, s_ty, scale=scale)
 
-            for x1, y1, x2, y2, label, conf in plan["boxes"]:
+            for x1, y1, x2, y2, label, conf, track_id in plan["boxes"]:
                 tx1, ty1, tx2, ty2 = self._transform_box(x1, y1, x2, y2, img_w, img_h)
                 sbox = (int(tx1 * scale), int(ty1 * scale), int(tx2 * scale), int(ty2 * scale))
-                overlay.draw_detection_box(image, sbox, label, conf, scale=scale)
+                overlay.draw_detection_box(image, sbox, label, conf, scale=scale, track_id=track_id)
 
             for ocx, ocy in plan["centroids"]:
                 tx, ty = self._transform_point(ocx, ocy, img_w, img_h)

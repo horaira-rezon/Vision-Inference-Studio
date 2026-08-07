@@ -1,16 +1,21 @@
 """
 Configuration window: External Actuation mode, the Diagonal Distance
-toggle, the X-Axis line mover, and the (scaffold-only, for now)
-Multiple Box Distance Merge section. Themed to match setup_screen.py's
-card look. Reads/writes straight through the shared Settings instance -
-MainApp's render loop reads those same settings fresh every frame, so
-nothing here needs to push updates back to it directly.
+toggle, the X-Axis line mover, Object Tracking, and the Confidence
+Threshold slider. Themed to match setup_screen.py's card look. Reads/
+writes straight through the shared Settings instance - MainApp's render
+loop reads those same settings fresh every frame, so nothing here needs
+to push updates back to it directly.
 
 Save/Reset: every toggle/slider/checkbox still applies immediately (so you
 get live preview in the video feed while adjusting things) and is written
 to disk right away via Settings.set(). "Save" is an explicit confirmation
 of that (useful since there's no other feedback that it stuck); "Reset"
-restores all four sections to their default values.
+restores all five numbered sections to their default values.
+
+Sections 4 (Object Tracking) and 5 (Confidence Threshold) are deliberately
+NOT gated by sections 1-3 (actuation mode / diagonal distance / axis) -
+they're independent controls that apply regardless of what those are set
+to, unlike the old Multi-Box Decision section they replaced.
 """
 
 import customtkinter as ctk
@@ -34,21 +39,27 @@ MODE_OPTIONS = [
     (
         "external",
         "External Actuation",
-        "Unlocks every option below - the Diagonal Distance toggle, the X-Axis line mover, and the Multiple Box Distance Merge section all become available.",
+        "Unlocks every option below - the Diagonal Distance toggle and the X-Axis line mover both become available.",
     ),
     (
         "diagonal_only",
         "Diagonal Distance Only",
-        "No external hardware, but you still need the diagonal line and distance readout. Diagonal Distance switches on automatically; the rest of the options below stay locked.",
+        "No external hardware, but you still need the diagonal line and distance readout. Diagonal Distance switches on automatically; the X-Axis line mover stays locked.",
     ),
+]
+
+TRACKER_OPTIONS = [
+    ("none", "No Tracking"),
+    ("bytetrack", "ByteTrack"),
+    ("botsort", "BotSORT"),
 ]
 
 DEFAULTS = {
     "actuation_mode": "none",
     "diagonal_distance_on": False,
     "x_axis_slider": 0.5,
-    "multi_box_count": 1,
-    "axis_quadrants": {},
+    "tracker_mode": "none",
+    "confidence_threshold": 50,
 }
 
 
@@ -56,7 +67,7 @@ class ConfigWindow(ctk.CTkToplevel):
     def __init__(self, master, settings, has_model_fn=None):
         super().__init__(master)
         self.settings = settings
-        self.has_model_fn = has_model_fn or (lambda: False)
+        self.has_model_fn = has_model_fn or (lambda: False)  # kept for API compatibility; unused now
 
         self.title("Configuration")
         self.geometry("620x760")
@@ -64,8 +75,7 @@ class ConfigWindow(ctk.CTkToplevel):
         self.configure(fg_color=BG)
 
         self._mode_cards = {}
-        self._axis_vars = {}
-        self._axis_checkboxes = []
+        self._tracker_buttons = {}
         self._wrap_labels = []  # (label, side_padding) - kept in sync with window width
         self._poll_after_id = None
         self._last_gating_state = None
@@ -77,9 +87,6 @@ class ConfigWindow(ctk.CTkToplevel):
         self.bind("<Configure>", self._update_wraplengths)
         self.protocol("WM_DELETE_WINDOW", self._close)
 
-        # keep the multi-box section's enabled/disabled state in sync even
-        # if a model finishes loading (in a background thread) while this
-        # window is left open
         self._poll_gating()
 
         self.after(50, self._focus_and_grab)
@@ -114,8 +121,7 @@ class ConfigWindow(ctk.CTkToplevel):
             header, text="Configuration", font=ctk.CTkFont(size=26, weight="bold")
         ).pack(side="left")
         # No custom close ("X") button here on purpose - the OS-provided
-        # title bar close button already closes this window; having both
-        # was a duplicate control.
+        # title bar close button already closes this window.
 
         scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=24, pady=(8, 16))
@@ -142,7 +148,7 @@ class ConfigWindow(ctk.CTkToplevel):
         self.diag_switch.pack(anchor="w")
         diag_desc = ctk.CTkLabel(
             diag_inner,
-            text="Draws the line from the axis lines intersection to the mouse click or boudning box centroid. OFF means no line and no overlay text at all.",
+            text="Draws the line from the axis lines intersection to the mouse click or bounding box centroid. OFF means no line and no overlay text at all.",
             font=ctk.CTkFont(size=13), text_color=DESC_COLOR, justify="left", anchor="w",
         )
         diag_desc.pack(anchor="w", pady=(6, 0), fill="x")
@@ -167,65 +173,60 @@ class ConfigWindow(ctk.CTkToplevel):
 
         axis_desc = ctk.CTkLabel(
             axis_inner,
-            text="Moves the horizontal crosshair line up or down without moving the true camera center. The diagonal line always follows the moving intersection point, not the fixed center.", 
+            text="Moves the horizontal crosshair line up or down without moving the true camera center. The diagonal line always follows the moving intersection point, not the fixed center.",
             font=ctk.CTkFont(size=13), text_color=DESC_COLOR, justify="left", anchor="w",
         )
         axis_desc.pack(anchor="w", pady=(6, 0), fill="x")
         self._register_wrap_label(axis_desc)
 
-        # --- 4. Multiple Box Distance Merge (scaffold) ---
-        self._section_title(scroll, "4. Multi-Box Decision")
-        self.box_card = ctk.CTkFrame(scroll, fg_color=CARD_BG, corner_radius=10, border_width=1, border_color=BORDER)
-        self.box_card.pack(fill="x", pady=(2, 4))
-        box_inner = ctk.CTkFrame(self.box_card, fg_color="transparent")
-        box_inner.pack(fill="x", padx=16, pady=12)
-        self.box_inner = box_inner
+        # --- 4. Object Tracking (independent of sections 1-3 above) ---
+        self._section_title(scroll, "4. Object Tracking")
+        tracker_card = ctk.CTkFrame(scroll, fg_color=CARD_BG, corner_radius=10, border_width=1, border_color=BORDER)
+        tracker_card.pack(fill="x", pady=(2, 4))
+        tracker_inner = ctk.CTkFrame(tracker_card, fg_color="transparent")
+        tracker_inner.pack(fill="x", padx=16, pady=12)
 
-        self.box_gate_label = ctk.CTkLabel(
-            box_inner, text="", font=ctk.CTkFont(size=13, weight="bold"), text_color=NOTE_COLOR,
+        tracker_row = ctk.CTkFrame(tracker_inner, fg_color="transparent")
+        tracker_row.pack(fill="x")
+
+        for i, (tracker_key, label) in enumerate(TRACKER_OPTIONS):
+            padx = (0, 4) if i == 0 else ((4, 4) if i < len(TRACKER_OPTIONS) - 1 else (4, 0))
+            btn = ctk.CTkButton(tracker_row, text=label, command=lambda k=tracker_key: self._select_tracker(k))
+            btn.pack(side="left", expand=True, fill="x", padx=padx)
+            self._tracker_buttons[tracker_key] = btn
+
+        # --- 5. Confidence Threshold (also independent of sections 1-3) ---
+        self._section_title(scroll, "5. Confidence Threshold")
+        conf_card = ctk.CTkFrame(scroll, fg_color=CARD_BG, corner_radius=10, border_width=1, border_color=BORDER)
+        conf_card.pack(fill="x", pady=(2, 4))
+        conf_inner = ctk.CTkFrame(conf_card, fg_color="transparent")
+        conf_inner.pack(fill="x", padx=16, pady=12)
+
+        conf_header = ctk.CTkFrame(conf_inner, fg_color="transparent")
+        conf_header.pack(fill="x")
+        ctk.CTkLabel(conf_header, text="Minimum confidence", font=ctk.CTkFont(size=13), text_color="gray70").pack(side="left")
+        self.confidence_value_label = ctk.CTkLabel(conf_header, text="50%", font=ctk.CTkFont(size=13, weight="bold"))
+        self.confidence_value_label.pack(side="right")
+
+        self.confidence_slider_var = tk.IntVar(value=50)
+        self.confidence_slider = ctk.CTkSlider(
+            conf_inner, from_=0, to=100, number_of_steps=100,
+            variable=self.confidence_slider_var, command=self._on_confidence_slide, progress_color=ACCENT,
         )
-        self.box_gate_label.pack(anchor="w", pady=(0, 8))
+        self.confidence_slider.pack(fill="x", pady=(6, 0))
+        self._prevent_slider_wheel_hijack(self.confidence_slider)
+        self._flush_on_release(self.confidence_slider)
 
-        count_row = ctk.CTkFrame(box_inner, fg_color="transparent")
-        count_row.pack(fill="x")
-
-        self.box_minus_btn = ctk.CTkButton(count_row, text="-", width=32, command=lambda: self._nudge_count(-1))
-        self.box_minus_btn.pack(side="left")
-
-        self.box_count_slider_var = tk.IntVar(value=1)
-        self.box_count_slider = ctk.CTkSlider(
-            count_row, from_=1, to=10, number_of_steps=9,
-            variable=self.box_count_slider_var, command=self._on_count_slide, progress_color=ACCENT,
-        )
-        self.box_count_slider.pack(side="left", fill="x", expand=True, padx=8)
-        self._prevent_slider_wheel_hijack(self.box_count_slider)
-        self._flush_on_release(self.box_count_slider)
-
-        self.box_plus_btn = ctk.CTkButton(count_row, text="+", width=32, command=lambda: self._nudge_count(1))
-        self.box_plus_btn.pack(side="left")
-
-        self.box_count_label = ctk.CTkLabel(box_inner, text="1 box", font=ctk.CTkFont(size=14, weight="bold"))
-        self.box_count_label.pack(anchor="w", pady=(6, 10))
-
-        box_desc = ctk.CTkLabel(
-            box_inner,
-            text="Sets how many detected boxes are considered together. The axis restriction below applies globally to all of them, not per box. Leave both sub-checkboxes off to cover the whole half.",
+        conf_desc = ctk.CTkLabel(
+            conf_inner,
+            text="Only boxes at or above this confidence score are shown in the streaming window and sent for actuation. Any tracking algorithm selected above only ever sees boxes that already pass this threshold.",
             font=ctk.CTkFont(size=13), text_color=DESC_COLOR, justify="left", anchor="w",
         )
-        box_desc.pack(anchor="w", pady=(0, 10), fill="x")
-        self._register_wrap_label(box_desc)
-
-        # Single, global axis configuration - applies to however many boxes
-        # are set above, rather than one set of checkboxes per box.
-        ctk.CTkLabel(
-            box_inner, text="Axis Configuration", font=ctk.CTkFont(size=13, weight="bold")
-        ).pack(anchor="w", pady=(4, 4))
-
-        self._make_axis_group(box_inner, "+Y axis", "pos_y")
-        self._make_axis_group(box_inner, "-Y axis", "neg_y")
+        conf_desc.pack(anchor="w", pady=(8, 0), fill="x")
+        self._register_wrap_label(conf_desc)
 
         # --- FPS Viewer (independent - not gated by anything above, and
-        # not touched by Reset, which only restores the 4 numbered sections) ---
+        # not touched by Reset, which only restores the 5 numbered sections) ---
         self._section_title(scroll, "FPS Viewer")
         fps_card = ctk.CTkFrame(scroll, fg_color=CARD_BG, corner_radius=10, border_width=1, border_color=BORDER)
         fps_card.pack(fill="x", pady=(2, 4))
@@ -301,32 +302,6 @@ class ConfigWindow(ctk.CTkToplevel):
 
         return card
 
-    def _make_axis_group(self, parent, group_label, group_key):
-        """Single global set of Y/X restriction checkboxes for group_key
-        ('pos_y' or 'neg_y') - shared across however many boxes are set,
-        not duplicated per box. Packed flush-left in `parent`, same
-        indentation as the section's description text above it."""
-        group = ctk.CTkFrame(parent, fg_color="transparent")
-        group.pack(anchor="w", fill="x", pady=(4, 0))
-
-        saved = self.settings.get("axis_quadrants") or {}
-        group_var = tk.BooleanVar(value=bool(saved.get(group_key, False)))
-        posx_var = tk.BooleanVar(value=bool(saved.get(f"{group_key}_posx", False)))
-        negx_var = tk.BooleanVar(value=bool(saved.get(f"{group_key}_negx", False)))
-        self._axis_vars[group_key] = (group_var, posx_var, negx_var)
-
-        def on_change(*_a, group_key=group_key, gv=group_var, pv=posx_var, nv=negx_var):
-            self._save_axis_quadrant(group_key, gv.get(), pv.get(), nv.get())
-
-        cb = ctk.CTkCheckBox(group, text=group_label, variable=group_var, command=on_change)
-        cb.pack(side="left")
-        cb_posx = ctk.CTkCheckBox(group, text="+X", variable=posx_var, command=on_change, width=20)
-        cb_posx.pack(side="left", padx=(16, 0))
-        cb_negx = ctk.CTkCheckBox(group, text="-X", variable=negx_var, command=on_change, width=20)
-        cb_negx.pack(side="left", padx=(8, 0))
-
-        self._axis_checkboxes.extend([cb, cb_posx, cb_negx])
-
     def _section_title(self, parent, text):
         ctk.CTkLabel(
             parent, text=text, font=ctk.CTkFont(size=16, weight="bold"), text_color="gray85"
@@ -367,11 +342,11 @@ class ConfigWindow(ctk.CTkToplevel):
 
     def _flush_on_release(self, slider):
         """The slider's `command` updates settings in-memory only (see
-        _on_axis_slide/_on_count_slide) so dragging doesn't hit the disk on
-        every tick. This writes the final value once the mouse button is
-        released, so the drag's end result still gets persisted. Uses
-        add="+" so CTkSlider's own release handling (which stops the drag)
-        keeps working - this only adds a second callback, it doesn't
+        _on_axis_slide/_on_confidence_slide) so dragging doesn't hit the
+        disk on every tick. This writes the final value once the mouse
+        button is released, so the drag's end result still gets persisted.
+        Uses add="+" so CTkSlider's own release handling (which stops the
+        drag) keeps working - this only adds a second callback, it doesn't
         replace it."""
 
         def flush(_event=None):
@@ -414,30 +389,29 @@ class ConfigWindow(ctk.CTkToplevel):
         self._apply_gating()
 
     def _on_fps_toggle(self):
-        # Fully independent of mode/gating/draft - just writes straight through
+        # Fully independent of mode/gating - just writes straight through
         self.settings.set("fps_viewer_on", bool(self.fps_switch_var.get()))
 
     def _on_axis_slide(self, value):
         self.settings.set("x_axis_slider", float(value), persist=False)
 
-    def _on_count_slide(self, value):
-        count = int(round(float(value)))
-        self.settings.set("multi_box_count", count, persist=False)
-        self.box_count_label.configure(text=f"{count} box" if count == 1 else f"{count} boxes")
+    def _select_tracker(self, tracker_key):
+        # Independent of sections 1-3 - always available, never gated
+        self.settings.set("tracker_mode", tracker_key)
+        self._refresh_tracker_buttons()
 
-    def _nudge_count(self, delta):
-        count = int(self.settings.get("multi_box_count") or 1)
-        count = max(1, min(10, count + delta))
-        self.box_count_slider_var.set(count)
-        self._on_count_slide(count)
-        self.settings.save()  # single click, not a drag - persist right away
+    def _refresh_tracker_buttons(self):
+        current = self.settings.get("tracker_mode") or "none"
+        for key, btn in self._tracker_buttons.items():
+            if key == current:
+                btn.configure(fg_color=ACCENT, hover_color="#1d4ed8", border_width=0)
+            else:
+                btn.configure(fg_color="transparent", hover_color=CARD_BG_HOVER, border_width=1, border_color="gray40")
 
-    def _save_axis_quadrant(self, group_key, group_on, posx_on, negx_on):
-        stored = dict(self.settings.get("axis_quadrants") or {})
-        stored[group_key] = bool(group_on)
-        stored[f"{group_key}_posx"] = bool(posx_on)
-        stored[f"{group_key}_negx"] = bool(negx_on)
-        self.settings.set("axis_quadrants", stored)
+    def _on_confidence_slide(self, value):
+        pct = int(round(float(value)))
+        self.settings.set("confidence_threshold", pct, persist=False)
+        self.confidence_value_label.configure(text=f"{pct}%")
 
     def _save_configuration(self):
         self.settings.save()  # everything already writes through live; this confirms it
@@ -461,9 +435,8 @@ class ConfigWindow(ctk.CTkToplevel):
     def _apply_gating(self):
         mode = self.settings.get("actuation_mode")
         diagonal_on = bool(self.settings.get("diagonal_distance_on"))
-        has_model = bool(self.has_model_fn())
 
-        state = (mode, diagonal_on, has_model)
+        state = (mode, diagonal_on)
         if state == self._last_gating_state:
             return
         self._last_gating_state = state
@@ -490,45 +463,27 @@ class ConfigWindow(ctk.CTkToplevel):
         axis_enabled = mode == "external"
         self.axis_slider.configure(state="normal" if axis_enabled else "disabled")
 
-        # section 4: multi-box merge - needs "external" + diagonal ON + a model
-        box_enabled = mode == "external" and diagonal_on and has_model
-        if mode != "external":
-            gate_text = "Requires External Actuation Mode"
-        elif not diagonal_on:
-            gate_text = "Turn Diagonal Distance ON"
-        elif not has_model:
-            gate_text = "Input Model Weight"
-        else:
-            gate_text = ""
-
-        self.box_gate_label.configure(text=gate_text)
-        widget_state = "normal" if box_enabled else "disabled"
-        self.box_count_slider.configure(state=widget_state)
-        self.box_minus_btn.configure(state=widget_state)
-        self.box_plus_btn.configure(state=widget_state)
-        self.box_card.configure(fg_color=CARD_BG if box_enabled else "#12161c")
-        for cb in self._axis_checkboxes:
-            cb.configure(state=widget_state)
+        # sections 4 & 5 (Object Tracking, Confidence Threshold) are
+        # intentionally never gated here - always enabled regardless of
+        # mode/diagonal/model state.
 
     # --------------------------------------------------------------- sync
     def _refresh_from_settings(self):
         mode = self.settings.get("actuation_mode")
         diagonal_on = bool(self.settings.get("diagonal_distance_on"))
         axis_val = self.settings.get("x_axis_slider")
-        count = int(self.settings.get("multi_box_count") or 1)
+        confidence = self.settings.get("confidence_threshold")
+        if confidence is None:
+            confidence = 50
 
         self.diag_switch_var.set(diagonal_on)
         self.axis_slider_var.set(axis_val if axis_val is not None else 0.5)
-        self.box_count_slider_var.set(count)
-        self.box_count_label.configure(text=f"{count} box" if count == 1 else f"{count} boxes")
+        self.confidence_slider_var.set(confidence)
+        self.confidence_value_label.configure(text=f"{confidence}%")
 
         for key, card in self._mode_cards.items():
             card.configure(fg_color=CARD_BG_SELECTED if key == mode else CARD_BG)
 
-        saved = self.settings.get("axis_quadrants") or {}
-        for group_key, (gv, pv, nv) in self._axis_vars.items():
-            gv.set(bool(saved.get(group_key, False)))
-            pv.set(bool(saved.get(f"{group_key}_posx", False)))
-            nv.set(bool(saved.get(f"{group_key}_negx", False)))
-
+        self._refresh_tracker_buttons()
+        self._last_gating_state = None  # force _apply_gating to re-sync widget states below
         self._apply_gating()
