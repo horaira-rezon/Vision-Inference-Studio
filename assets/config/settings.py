@@ -30,7 +30,7 @@ DEFAULT_SETTINGS = {
     # moving the true camera-center dot or any real-world calculation.
     "x_axis_slider": 0.5,
     # Object Tracking (Configuration window, section 4) - "none" | "bytetrack"
-    # | "botsort". Independent of actuation_mode/diagonal_distance_on.
+    # | "botsort" | "ocsort" | "deepsort". Independent of actuation_mode/diagonal_distance_on.
     "tracker_mode": "none",
     # Confidence Threshold (section 5), 0-100. Boxes below this are dropped
     # by YoloEngine.detect() itself - the SAME filtered list is what gets

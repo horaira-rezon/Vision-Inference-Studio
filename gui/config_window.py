@@ -52,6 +52,8 @@ TRACKER_OPTIONS = [
     ("none", "No Tracking"),
     ("bytetrack", "ByteTrack"),
     ("botsort", "BotSORT"),
+    ("ocsort", "OC-SORT"),
+    ("deepsort", "DeepSORT"),
 ]
 
 DEFAULTS = {
@@ -189,11 +191,19 @@ class ConfigWindow(ctk.CTkToplevel):
         tracker_row = ctk.CTkFrame(tracker_inner, fg_color="transparent")
         tracker_row.pack(fill="x")
 
+        # Use grid layout with wrapping (max 3 columns)
+        max_columns = 3
         for i, (tracker_key, label) in enumerate(TRACKER_OPTIONS):
-            padx = (0, 4) if i == 0 else ((4, 4) if i < len(TRACKER_OPTIONS) - 1 else (4, 0))
+            row = i // max_columns
+            col = i % max_columns
+            padx = (4, 4)
+            pady = (4, 4)
             btn = ctk.CTkButton(tracker_row, text=label, command=lambda k=tracker_key: self._select_tracker(k))
-            btn.pack(side="left", expand=True, fill="x", padx=padx)
+            btn.grid(row=row, column=col, padx=padx, pady=pady, sticky="ew")
             self._tracker_buttons[tracker_key] = btn
+        # Make columns expand equally
+        for col in range(max_columns):
+            tracker_row.columnconfigure(col, weight=1)
 
         # --- 5. Confidence Threshold (also independent of sections 1-3) ---
         self._section_title(scroll, "5. Confidence Threshold")

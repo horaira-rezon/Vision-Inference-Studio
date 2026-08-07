@@ -197,3 +197,4 @@ xdg==5
 xgboost==3.3.0
 xkit==0.0.0
 zipp==3.23.0
+boxmot>=22.0.0

@@ -132,7 +132,7 @@ def draw_text_lines(image, lines, origin=(10, 24), gap=None, scale=1.0):
 def draw_detection_box(image, box, label, conf, scale=1.0, track_id=None):
     """Techy corner-bracket style instead of a full rectangle outline, plus
     a filled label pill (like a targeting HUD) instead of plain text.
-    When track_id is given (ByteTrack/BotSORT active), it's placed before
+    When track_id is given (ByteTrack/BotSORT/OC-SORT/DeepSORT active), it's placed before
     the class name with a space, e.g. "3 weed 0.85"."""
     x1, y1, x2, y2 = box
     color = TECH_ACCENT
