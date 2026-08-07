@@ -1,16 +1,24 @@
 """
 Detection Worker: runs model inference on a background thread. The GUI's
 frame loop calls submit_frame() (non-blocking - just hands off the latest
-frame, tracker mode, and confidence threshold together) and
-get_latest_detections() (non-blocking - reads whatever the worker most
-recently finished). If inference is slower than the video feed, frames
-are naturally skipped (only the newest one is ever waiting) rather than
-queuing up and making everything progressively laggier.
+frame, tracker mode, and confidence threshold together), get_latest_
+detections() (non-blocking - reads whatever the worker most recently
+finished), and get_latest_error() (non-blocking - reads the message from
+the most recent failed detect() call, or None). If inference is slower
+than the video feed, frames are naturally skipped (only the newest one is
+ever waiting) rather than queuing up and making everything progressively
+laggier.
 
 tracker/confidence_threshold are bundled with the frame (rather than set
 separately) so a given detect() call always uses the values that were
 current at the moment that specific frame was submitted - no separate
 shared state to race against.
+
+Errors from detect() (e.g. a tracker failing to construct, like DeepSORT's
+ReID weights not loading) used to be swallowed silently here, which meant
+a broken tracker just showed nothing forever with zero explanation.
+get_latest_error() exists specifically so app.py can surface that as a
+notice instead.
 """
 
 import threading
@@ -24,6 +32,7 @@ class DetectionWorker:
         self._latest_tracker = None
         self._latest_confidence_threshold = 0.0
         self._latest_detections = []
+        self._latest_error = None
         self._running = True
         self._new_frame = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -39,6 +48,10 @@ class DetectionWorker:
     def get_latest_detections(self):
         with self._lock:
             return self._latest_detections
+
+    def get_latest_error(self):
+        with self._lock:
+            return self._latest_error
 
     def _run(self):
         while self._running:
@@ -57,11 +70,14 @@ class DetectionWorker:
 
             try:
                 detections = self.model.detect(frame, tracker=tracker, confidence_threshold=confidence_threshold)
-            except Exception:
+                error = None
+            except Exception as e:
                 detections = []
+                error = str(e)
 
             with self._lock:
                 self._latest_detections = detections
+                self._latest_error = error
 
     def stop(self):
         self._running = False

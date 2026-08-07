@@ -37,6 +37,7 @@ class YoloEngine:
     def __init__(self, weight_path):
         from ultralytics import YOLO  # imported lazily: app still runs without ultralytics installed
         self.model = YOLO(weight_path)
+        self._last_tracker_param = "__unset__"
 
         # a fresh model load means any previous OC-SORT/DeepSORT instance
         # (module-level, in custom_trackers.py) belongs to the old model -
@@ -54,6 +55,27 @@ class YoloEngine:
         confidence_threshold: 0.0-1.0. Detections below this are dropped
             entirely (not just hidden from display).
         """
+        if tracker != self._last_tracker_param:
+            # Ultralytics' model.track() does two things the first time
+            # it's called: builds self.model.predictor, AND permanently
+            # registers on_predict_start/on_predict_postprocess_end
+            # callbacks on self.model itself (register_tracker() in
+            # ultralytics/trackers/track.py calls model.add_callback(...),
+            # not predictor.add_callback(...)). Those callbacks are what
+            # actually assign box.id - and because they live on the MODEL,
+            # not the predictor, resetting predictor alone doesn't remove
+            # them: they keep firing on every later plain self.model(frame)
+            # call too, which is why "bytetrack/botsort -> No Tracking"
+            # kept showing IDs while "ocsort/deepsort -> No Tracking"
+            # (which never call .track() at all, so never register these)
+            # never had the problem. model.reset_callbacks() clears them
+            # back to Ultralytics' defaults.
+            self.model.predictor = None
+            self.model.reset_callbacks()
+            from assets.detection import custom_trackers
+            custom_trackers.reset()
+            self._last_tracker_param = tracker
+
         if tracker in CUSTOM_TRACKERS:
             return self._detect_custom_tracker(frame, tracker, confidence_threshold)
 

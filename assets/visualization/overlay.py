@@ -13,6 +13,17 @@ TECH_ACCENT = (255, 210, 40)   # cyan-ish (BGR) - boxes, axes, center point
 TARGET_DOT = (0, 0, 255)       # simple red dot (BGR) - click targets & centroids
 
 
+def _text_scale(scale):
+    """Font size and stroke weight for on-screen TEXT are capped through
+    this, separately from the real `scale` boxes/lines/positions use.
+    Maximizing the window grows the display panel (and therefore `scale`)
+    well past 1.0, and text scaling 1:1 with that stopped looking like
+    "bigger text" and started looking oversized/blurry/bold instead.
+    Capping it keeps text legible and crisp regardless of panel size;
+    everything else in this module keeps using the real `scale`."""
+    return min(scale, 1.3)
+
+
 def draw_axes(image, cx, axis_y, thickness=1, color=(100, 100, 100)):
     """Full-width/height crosshair. `cx` is always the true camera/frame
     center column and never moves. `axis_y` is the row the horizontal line
@@ -101,29 +112,33 @@ def draw_centroid_marker(image, cx, cy, color=None, scale=1.0):
 
 
 def draw_fps(image, fps, scale=1.0):
-    """Same font, color, and scale-with-resolution behavior as the other
-    streaming-window overlay text (draw_text_lines): green, HERSHEY_SIMPLEX,
-    0.5*scale font size, thickness scaling with it too. Drawn top-right
-    (rather than reusing draw_text_lines' top-left origin) so it never
-    overlaps the Pixel Dist / depth / nozzle text there."""
+    """Same font and color as the other streaming-window overlay text
+    (draw_text_lines): green, HERSHEY_SIMPLEX. Size/weight are capped via
+    _text_scale rather than following the raw display scale 1:1 (see that
+    function's docstring). Drawn top-right (rather than reusing
+    draw_text_lines' top-left origin) so it never overlaps the Pixel Dist
+    / depth / nozzle text there."""
     text = f"FPS: {fps:.1f}"
-    font_scale = 0.5 * scale
-    thickness = max(1, round(2 * scale))
+    ts = _text_scale(scale)
+    font_scale = 0.5 * ts
+    thickness = max(1, round(1.7 * ts))
     (tw, _th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
     h, w = image.shape[:2]
-    x = w - tw - int(10 * scale)
-    y = int(24 * scale)
+    x = w - tw - int(10 * ts)
+    y = int(24 * ts)
     cv2.putText(image, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 0), thickness, cv2.LINE_AA)
 
 
 def draw_text_lines(image, lines, origin=(10, 24), gap=None, scale=1.0):
     """lines: list of (text, bgr_color) tuples, stacked top to bottom.
-    Font size, thickness, and line spacing all scale with `scale` so text
-    stays legible (not tiny) when drawn on a larger display frame."""
-    font_scale = 0.5 * scale
-    thickness = max(1, round(2 * scale))
-    line_gap = gap if gap is not None else int(22 * scale)
-    x, y = int(origin[0] * scale), int(origin[1] * scale)
+    Font size/thickness/line spacing scale with a capped version of
+    `scale` (see _text_scale) so text stays crisp and legible instead of
+    ballooning 1:1 with a maximized display panel."""
+    ts = _text_scale(scale)
+    font_scale = 0.5 * ts
+    thickness = max(1, round(1.7 * ts))
+    line_gap = gap if gap is not None else int(22 * ts)
+    x, y = int(origin[0] * ts), int(origin[1] * ts)
     for i, (text, color) in enumerate(lines):
         cv2.putText(image, text, (x, y + i * line_gap), cv2.FONT_HERSHEY_SIMPLEX,
                     font_scale, color, thickness, cv2.LINE_AA)
@@ -152,10 +167,12 @@ def draw_detection_box(image, box, label, conf, scale=1.0, track_id=None):
         label_text = f"{track_id} {label} {conf:.2f}"
     else:
         label_text = f"{label} {conf:.2f}"
-    font_scale = 0.5 * scale
-    (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
-    pad = max(3, round(4 * scale))
-    label_gap = max(2, round(3 * scale))
+    ts = _text_scale(scale)
+    font_scale = 0.5 * ts
+    text_thickness = max(1, round(1.7 * ts))
+    (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_thickness)
+    pad = max(3, round(4 * ts))
+    label_gap = max(2, round(3 * ts))
     # cv2 draws a line of a given thickness centered on its coordinate, so
     # the corner bracket's outer left edge actually sits `thickness // 2`
     # pixels to the left of x1 - not exactly at x1. Anchor the label pill
@@ -164,4 +181,4 @@ def draw_detection_box(image, box, label, conf, scale=1.0, track_id=None):
     # couple of pixels.
     label_x = x1 - (thickness // 2)
     cv2.rectangle(image, (label_x, y1 - th - 2 * pad - label_gap), (label_x + tw + 2 * pad, y1 - label_gap), color, -1)
-    cv2.putText(image, label_text, (label_x + pad, y1 - pad - label_gap), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (20, 20, 20), thickness, cv2.LINE_AA)
+    cv2.putText(image, label_text, (label_x + pad, y1 - pad - label_gap), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (20, 20, 20), text_thickness, cv2.LINE_AA)

@@ -57,7 +57,7 @@ class MainApp(ctk.CTkFrame):
 
         self.model = None
         self.detection_worker = None
-
+        self._last_detection_error = None
         self.arduino = None
         self.nozzle = NozzleTargeting() if PRIVATE_MODULE_AVAILABLE else None
         self.recorder = Recorder()
@@ -65,6 +65,7 @@ class MainApp(ctk.CTkFrame):
         self._raw_frame = None  # clean frame (no overlay), refreshed every loop
         self.fps = 0.0
         self._last_frame_time = None
+        self._frame_after_id = None
         self._last_plan = (
             None  # render plan for the same frame, for on-demand overlay variants
         )
@@ -335,17 +336,21 @@ class MainApp(ctk.CTkFrame):
 
         self.video_label.bind("<Button-1>", self._on_click)
 
+        self.NOTICE_MARGIN = 40
         self.notice_bar = ctk.CTkLabel(
             outer,
             text="",
             font=ctk.CTkFont(size=20),
             fg_color="transparent",
             text_color=NOTICE_COLORS["idle"],
+            justify="center",
         )
 
         self.notice_bar.place(
             relx=0.5, rely=1.0, anchor="center", y=-(self.BOTTOM_GAP // 2)
         )
+        outer.bind("<Configure>", self._update_notice_wraplength)
+        self.after(50, self._update_notice_wraplength)
 
         self.right_sidebar_container = ctk.CTkFrame(
             self, width=320, corner_radius=0, fg_color="#1a1d23"
@@ -360,6 +365,11 @@ class MainApp(ctk.CTkFrame):
         self.right_sidebar = ViewControls(self.right_sidebar_container, self)
 
         self.right_sidebar.grid(row=0, column=0, sticky="nsew")
+
+    def _update_notice_wraplength(self, event=None):
+        width = self.video_frame.winfo_width()
+        if width > 1:
+            self.notice_bar.configure(wraplength=max(200, width - self.NOTICE_MARGIN * 2))
 
     def _show_notice(self, text, color_key="ok"):
         self.notice_bar.configure(
@@ -440,6 +450,7 @@ class MainApp(ctk.CTkFrame):
             self.detection_worker.stop()
         self.model = model
         self.detection_worker = DetectionWorker(model)
+        self._last_detection_error = None
         self._set_dot(self.model_dot, "ok")
         self._show_notice(f"Model loaded: {path.split('/')[-1]}", "ok")
 
@@ -597,8 +608,6 @@ class MainApp(ctk.CTkFrame):
             return
 
         raw_image, depth_frame, cx, cy = self.camera_source.read()
-        self.raw_width = raw_image.shape[1]
-        self.raw_height = raw_image.shape[0]
 
         now = time.perf_counter()
         if self._last_frame_time is not None:
@@ -609,6 +618,9 @@ class MainApp(ctk.CTkFrame):
         self._last_frame_time = now
 
         if raw_image is not None:
+            self.raw_width = raw_image.shape[1]
+            self.raw_height = raw_image.shape[0]
+
             # Compute everything ONCE - detection inference, nozzle math,
             # and any Arduino send all happen exactly one time per frame,
             # regardless of how many times the result gets drawn below.
@@ -639,7 +651,7 @@ class MainApp(ctk.CTkFrame):
             self.video_label.imgtk = imgtk  # keep a reference
             self.video_label.configure(image=imgtk, text="")
 
-        self.after(15, self.update_frame)
+        self._frame_after_id = self.after(15, self.update_frame)
 
     def _scale_raw_to_panel(self, image):
         """Resizes a CLEAN (no overlay) frame using the margins/gap from
@@ -886,6 +898,13 @@ class MainApp(ctk.CTkFrame):
                 confidence_threshold=(self.settings.get("confidence_threshold") or 0) / 100.0,
             )
             detections = self.detection_worker.get_latest_detections()
+
+            error = self.detection_worker.get_latest_error()
+            if error != self._last_detection_error:
+                self._last_detection_error = error
+                if error:
+                    self._show_notice(f"Tracking error: {error}", "error")
+
             for i, det in enumerate(detections):
                 x1, y1, x2, y2 = det["box"]
                 plan["boxes"].append((x1, y1, x2, y2, det["label"], det["conf"], det.get("track_id")))
@@ -1071,6 +1090,12 @@ class MainApp(ctk.CTkFrame):
 
     # ------------------------------------------------------------ close
     def on_close(self):
+        if self._frame_after_id is not None:
+            try:
+                self.after_cancel(self._frame_after_id)
+            except Exception:
+                pass
+            self._frame_after_id = None
         if self.config_window is not None and self.config_window.winfo_exists():
             self.config_window.destroy()
         self.recorder.stop_recording()

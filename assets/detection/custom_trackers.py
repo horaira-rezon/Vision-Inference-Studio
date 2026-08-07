@@ -15,6 +15,9 @@ Requires the `boxmot` package (pip install boxmot).
 import numpy as np
 
 _TRACKER_INSTANCES = {}
+_TRACKER_ERRORS = {}  # tracker_key -> error message, so a known-broken
+                       # tracker (e.g. DeepSORT with a failed ReID download)
+                       # doesn't retry construction on every single frame
 
 
 def _get_tracker(tracker_key):
@@ -24,23 +27,70 @@ def _get_tracker(tracker_key):
     if tracker_key in _TRACKER_INSTANCES:
         return _TRACKER_INSTANCES[tracker_key]
 
+    if tracker_key in _TRACKER_ERRORS:
+        # already failed once this session - re-raise the same message
+        # instead of re-attempting a potentially expensive (or network-
+        # downloading) construction again on every frame
+        raise RuntimeError(_TRACKER_ERRORS[tracker_key])
+
     from pathlib import Path
     import torch
 
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-    if tracker_key == "ocsort":
-        from boxmot.trackers.bbox import OcSort
-        tracker = OcSort()
-    elif tracker_key == "deepsort":
-        from boxmot.trackers.bbox import DeepOcSort
-        tracker = DeepOcSort(
-            reid_weights=Path("osnet_x0_25_msmt17.pt"),
-            device=device,
-            half=False,
-        )
-    else:
-        raise ValueError(f"Unknown custom tracker: {tracker_key}")
+    # boxmot's own auto-downloader targets its package-relative WEIGHTS
+    # folder - that's what its example/CLI code points reid_weights at.
+    # A bare relative filename (no resolved directory) is what silently
+    # produced reid_model=None before: nothing on disk at that path, and
+    # apparently no download triggered from it either.
+    try:
+        from boxmot.utils import WEIGHTS
+        reid_weights_path = WEIGHTS / "osnet_x0_25_msmt17.pt"
+    except Exception:
+        reid_weights_path = Path("osnet_x0_25_msmt17.pt")
+
+    try:
+        if tracker_key == "ocsort":
+            from boxmot.trackers.bbox import OcSort
+            tracker = OcSort()
+        elif tracker_key == "deepsort":
+            from boxmot.trackers.bbox import DeepOcSort
+            tracker = DeepOcSort(
+                reid_weights=reid_weights_path,
+                device=device,
+                half=False,
+            )
+
+            # DeepOcSort's constructor does NOT raise if the ReID weights
+            # fail to load or auto-download (e.g. no internet access at
+            # runtime, or this boxmot version expects the weights placed
+            # somewhere other than reid_weights_path) - it silently falls
+            # back to reid_model=None and then produces empty tracking
+            # output on every single frame, which is exactly what "DeepSORT
+            # shows nothing at all" looked like, with no error anywhere.
+            # Failing loudly here, the moment it happens, turns that into
+            # a visible notice instead.
+            if getattr(tracker, "reid_model", None) is None:
+                raise RuntimeError(
+                    f"DeepSORT's ReID weights did not load from "
+                    f"{reid_weights_path} - boxmot silently falls back to a "
+                    f"non-functional tracker instead of raising, which is why "
+                    f"nothing was appearing on screen. This usually means the "
+                    f"auto-download failed (check internet access on this "
+                    f"machine) or your installed boxmot version expects the "
+                    f"weights somewhere else. Try downloading "
+                    f"osnet_x0_25_msmt17.pt yourself and placing it at exactly "
+                    f"that path, or run `python3 -c \"from boxmot import "
+                    f"DeepOcSort; DeepOcSort(reid_weights='{reid_weights_path}', "
+                    f"device='cpu', half=False)\"` in your terminal (with the "
+                    f"venv active) to see boxmot's own warning/error output "
+                    f"directly."
+                )
+        else:
+            raise ValueError(f"Unknown custom tracker: {tracker_key}")
+    except Exception as e:
+        _TRACKER_ERRORS[tracker_key] = str(e)
+        raise
 
     _TRACKER_INSTANCES[tracker_key] = tracker
     return tracker
@@ -68,11 +118,14 @@ def track(tracker_key, frame, boxes):
 
 
 def reset(tracker_key=None):
-    """Drops the persistent tracker instance(s) - called whenever a new
-    model is loaded (see YoloEngine.__init__) so an old tracker's internal
-    state never leaks into a new model/session. tracker_key=None clears
-    every custom tracker at once."""
+    """Drops the persistent tracker instance(s) AND any cached error for
+    them - called whenever a new model is loaded (see YoloEngine.__init__)
+    or the tracker selection changes (see YoloEngine.detect()), so old
+    state/errors never leak into a new model/session/attempt.
+    tracker_key=None clears everything at once."""
     if tracker_key is None:
         _TRACKER_INSTANCES.clear()
+        _TRACKER_ERRORS.clear()
     else:
         _TRACKER_INSTANCES.pop(tracker_key, None)
+        _TRACKER_ERRORS.pop(tracker_key, None)
