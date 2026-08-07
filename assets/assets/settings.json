@@ -8,7 +8,7 @@
   "actuation_mode": "diagonal_only",
   "diagonal_distance_on": true,
   "x_axis_slider": 0.5,
-  "tracker_mode": "bytetrack",
+  "tracker_mode": "deepsort",
   "confidence_threshold": 50,
   "fps_viewer_on": true,
   "multi_box_count": 1,
