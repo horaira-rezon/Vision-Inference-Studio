@@ -53,7 +53,7 @@ TRACKER_OPTIONS = [
     ("bytetrack", "ByteTrack"),
     ("botsort", "BotSORT"),
     ("ocsort", "OC-SORT"),
-    ("deepsort", "DeepSORT"),
+    ("deepocsort", "DeepOC-SORT"),
 ]
 
 DEFAULTS = {

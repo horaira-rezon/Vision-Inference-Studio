@@ -13,7 +13,7 @@ choke point: whatever detect() returns is exactly what gets drawn in the
 streaming window AND exactly what's eligible to be sent to the Arduino -
 there's no separate filtering logic to keep in sync between the two.
 
-Tracking (ByteTrack/BotSORT/OC-SORT/DeepSORT) uses Ultralytics' built-in model.track()
+Tracking (ByteTrack/BotSORT/OC-SORT/DeepOC-SORT) uses Ultralytics' built-in model.track()
 instead of a plain forward pass when a tracker is selected, which is what
 provides the per-box track_id.
 """
@@ -27,10 +27,10 @@ TRACKER_YAML = {
     "botsort": "botsort.yaml",
 }
 
-# "ocsort" / "deepsort" aren't Ultralytics-native trackers (no built-in
+# "ocsort" / "deepOC-sort" aren't Ultralytics-native trackers (no built-in
 # yaml for either), so they run through custom_trackers.py instead - see
 # YoloEngine.detect() below.
-CUSTOM_TRACKERS = ("ocsort", "deepsort")
+CUSTOM_TRACKERS = ("ocsort", "deepocsort")
 
 
 class YoloEngine:
@@ -39,7 +39,7 @@ class YoloEngine:
         self.model = YOLO(weight_path)
         self._last_tracker_param = "__unset__"
 
-        # a fresh model load means any previous OC-SORT/DeepSORT instance
+        # a fresh model load means any previous OC-SORT/DeepOC-SORT instance
         # (module-level, in custom_trackers.py) belongs to the old model -
         # drop it so its track IDs/appearance state don't leak forward
         from assets.detection import custom_trackers
@@ -49,7 +49,7 @@ class YoloEngine:
         """
         tracker: None/"none" for a plain detection pass, "bytetrack" /
             "botsort" to run Ultralytics' own persistent tracker, or
-            "ocsort" / "deepsort" to run the boxmot-backed tracker in
+            "ocsort" / "deepocsort" to run the boxmot-backed tracker in
             custom_trackers.py instead - every option gives each detection
             a "track_id".
         confidence_threshold: 0.0-1.0. Detections below this are dropped
@@ -66,7 +66,7 @@ class YoloEngine:
             # not the predictor, resetting predictor alone doesn't remove
             # them: they keep firing on every later plain self.model(frame)
             # call too, which is why "bytetrack/botsort -> No Tracking"
-            # kept showing IDs while "ocsort/deepsort -> No Tracking"
+            # kept showing IDs while "ocsort/deepocsort -> No Tracking"
             # (which never call .track() at all, so never register these)
             # never had the problem. model.reset_callbacks() clears them
             # back to Ultralytics' defaults.
@@ -108,7 +108,7 @@ class YoloEngine:
         return detections
 
     def _detect_custom_tracker(self, frame, tracker, confidence_threshold):
-        """OC-SORT/DeepSORT path: a plain (untracked) forward pass, same as
+        """OC-SORT/DeepOC-SORT path: a plain (untracked) forward pass, same as
         the "no tracker" branch above, then boxmot assigns track IDs on top.
         Box-fallback and confidence filtering both mirror the bytetrack/
         botsort path above exactly, so behavior is identical either way."""

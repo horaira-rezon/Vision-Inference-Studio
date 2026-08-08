@@ -14,7 +14,7 @@ separately) so a given detect() call always uses the values that were
 current at the moment that specific frame was submitted - no separate
 shared state to race against.
 
-Errors from detect() (e.g. a tracker failing to construct, like DeepSORT's
+Errors from detect() (e.g. a tracker failing to construct, like DeepOC-SORT's
 ReID weights not loading) used to be swallowed silently here, which meant
 a broken tracker just showed nothing forever with zero explanation.
 get_latest_error() exists specifically so app.py can surface that as a

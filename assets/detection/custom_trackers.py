@@ -1,8 +1,8 @@
 """
-OC-SORT and DeepSORT tracking, added alongside Ultralytics' built-in
+OC-SORT and DeepOC-SORT tracking, added alongside Ultralytics' built-in
 ByteTrack/BotSORT support. Ultralytics' model.track() only ships
 bytetrack.yaml and botsort.yaml internally - it has no native OC-SORT or
-DeepSORT config - so those two run through the `boxmot` package instead:
+DeepOC-SORT config - so those two run through the `boxmot` package instead:
 yolo_engine.py runs a plain (non-tracking) YOLO forward pass to get raw
 detections, hands them to track() below, and a persistent boxmot tracker
 instance assigns track IDs to them frame-to-frame - same end result (a
@@ -16,7 +16,7 @@ import numpy as np
 
 _TRACKER_INSTANCES = {}
 _TRACKER_ERRORS = {}  # tracker_key -> error message, so a known-broken
-                       # tracker (e.g. DeepSORT with a failed ReID download)
+                       # tracker (e.g. DeepOC-SORT with a failed ReID download)
                        # doesn't retry construction on every single frame
 
 
@@ -41,7 +41,7 @@ def _get_tracker(tracker_key):
         if tracker_key == "ocsort":
             from boxmot.trackers.bbox import OcSort
             tracker = OcSort()
-        elif tracker_key == "deepsort":
+        elif tracker_key == "deepocsort":
             tracker = _build_deepsort(device)
         else:
             raise ValueError(f"Unknown custom tracker: {tracker_key}")
@@ -69,7 +69,7 @@ def _build_deepsort(device):
 
     Falls back to embedding_off=True (boxmot's own fully-supported
     motion-only mode, same association logic as OC-SORT) only if a real
-    ReID backend genuinely can't be built - so DeepSORT always ends up
+    ReID backend genuinely can't be built - so DeepOC-SORT always ends up
     usable, even on a machine where the appearance weights can't be
     resolved at all."""
     from boxmot.reid.core import ReID
@@ -97,16 +97,16 @@ def _build_deepsort(device):
             print(f"[custom_trackers] failed to build/load a ReID backend from {weights_path}: {type(e).__name__}: {e}")
 
     print(
-        "[custom_trackers] DeepSORT's ReID weights (osnet_x0_25_msmt17.pt) "
+        "[custom_trackers] DeepOC-SORT's ReID weights (osnet_x0_25_msmt17.pt) "
         f"could not be loaded (expected at {weights_path}). Falling back to "
-        "DeepSORT's motion-only mode (embedding_off=True) - tracking still "
+        "DeepOC-SORT's motion-only mode (embedding_off=True) - tracking still "
         "works, just without appearance-based re-identification."
     )
     try:
         return DeepOcSort(embedding_off=True)
     except Exception as e:
         raise RuntimeError(
-            "DeepSORT could not be constructed at all, even in motion-only "
+            "DeepOC-SORT could not be constructed at all, even in motion-only "
             f"mode (embedding_off=True): {e}. This points to a boxmot "
             "installation/version issue beyond just the ReID weights - check "
             "`pip show boxmot` and that DeepOcSort is available in your "
