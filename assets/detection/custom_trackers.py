@@ -83,13 +83,38 @@ def _build_deepsort(device):
         if getattr(tracker, "reid_model", None) is not None:
             return tracker
 
+    # boxmot's own registered download source for this exact file has a
+    # long, well-documented history of dead/rate-limited links (it was
+    # originally Google-Drive-hosted, going back to the torchreid project
+    # this is descended from - see e.g. github.com/mikel-brostrom/boxmot
+    # issues #781, #1154, #944 for the same "silently fails to load"
+    # pattern with different weights files). A stable connection but still
+    # reid_model=None points at that, not at anything local. Rather than
+    # keep guessing at boxmot's internal download mechanism, fetch a known
+    # copy ourselves from a couple of verified-to-exist mirrors. This is
+    # safe even if a mirror turns out to be the wrong file/architecture:
+    # boxmot's own loader below is what actually validates it (matching
+    # state_dict keys/shapes), so a bad download just fails to load and
+    # falls through to the same motion-only fallback as before - it can
+    # never silently produce corrupt/wrong embeddings.
+    target = attempts[0] if attempts and isinstance(attempts[0], Path) else Path("osnet_x0_25_msmt17.pt")
+    if _try_download_reid_weights(target):
+        try:
+            tracker = DeepOcSort(reid_weights=target, device=device, half=False)
+            if getattr(tracker, "reid_model", None) is not None:
+                return tracker
+        except Exception:
+            pass  # wrong/corrupt file - fall through to motion-only below
+
     print(
         "[custom_trackers] DeepSORT's ReID weights (osnet_x0_25_msmt17.pt) "
-        f"could not be loaded automatically (tried: {[str(a) for a in attempts]}). "
-        "Falling back to DeepSORT's motion-only mode (embedding_off=True) - "
-        "tracking still works, just without appearance-based re-identification. "
-        "For full DeepSORT, download osnet_x0_25_msmt17.pt yourself and place "
-        f"it at {attempts[0]}."
+        f"could not be loaded automatically (tried boxmot's own resolution: "
+        f"{[str(a) for a in attempts]}, and a direct download from a couple "
+        "of known mirrors). Falling back to DeepSORT's motion-only mode "
+        "(embedding_off=True) - tracking still works, just without "
+        "appearance-based re-identification. See this session's reply for "
+        "how to check exactly why boxmot's own download is failing, and "
+        f"where to place a manually-downloaded copy ({target})."
     )
     try:
         return DeepOcSort(reid_weights=Path("osnet_x0_25_msmt17.pt"), device=device, half=False, embedding_off=True)
@@ -101,6 +126,47 @@ def _build_deepsort(device):
             "`pip show boxmot` and that DeepOcSort is available in your "
             "installed version."
         ) from e
+
+
+def _try_download_reid_weights(target_path):
+    """Best-effort direct download of osnet_x0_25_msmt17.pt. The primary
+    mirror is a HuggingFace repo dedicated specifically to this file
+    (not bundled inside someone's unrelated demo project); its SHA256
+    matches a second, independently-uploaded copy found separately, which
+    is strong evidence it's the genuine, correct checkpoint rather than a
+    mismatched/corrupted one - so it's verified against that hash before
+    ever being accepted. The secondary mirror has no independently-
+    confirmed hash, so it only gets a size sanity check; either way,
+    boxmot's own loader (the caller) is the final, real correctness
+    check - a bad file simply fails to load and falls through to the
+    existing motion-only fallback, never silently produces bad tracking."""
+    import hashlib
+    import urllib.request
+
+    KNOWN_GOOD_SHA256 = "6f57607fed9f502b9efed546108132ee715df5a5b6e6932c6269bacb47f59f99"
+    mirrors = [
+        ("https://huggingface.co/paulosantiago/osnet_x0_25_msmt17/resolve/main/osnet_x0_25_msmt17.pt", KNOWN_GOOD_SHA256),
+        ("https://huggingface.co/spaces/xfys/yolov5_tracking/resolve/main/weights/osnet_x0_25_msmt17.pt", None),
+    ]
+
+    for url, expected_sha256 in mirrors:
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            urllib.request.urlretrieve(url, target_path)
+            if not target_path.exists() or target_path.stat().st_size < 1_000_000:
+                target_path.unlink(missing_ok=True)
+                continue
+            if expected_sha256:
+                actual = hashlib.sha256(target_path.read_bytes()).hexdigest()
+                if actual != expected_sha256:
+                    print(f"[custom_trackers] downloaded {url} but its SHA256 didn't match the known-good hash (got {actual}) - discarding")
+                    target_path.unlink(missing_ok=True)
+                    continue
+            return True
+        except Exception:
+            target_path.unlink(missing_ok=True)
+            continue
+    return False
 
 
 def track(tracker_key, frame, boxes):

@@ -37,6 +37,19 @@ class WebcamSource(CameraSource):
         # cap.set() calls above are best-effort: on hardware/drivers that
         # don't support a given mode they simply fail and leave whatever
         # was already negotiated in place - never raises, never crashes.
+        # But that also means a request can silently do nothing, so print
+        # back what actually got negotiated: if fourcc isn't MJPG and/or
+        # fps is still ~10 here, the requests above were ignored by this
+        # camera/driver and the ~10fps ceiling is a genuine hardware
+        # limit at this resolution, not something software can lift -
+        # run `v4l2-ctl --list-formats-ext -d /dev/videoN` (swap N for
+        # this camera's index) to see what modes it actually supports.
+        fourcc_int = int(self.cap.get(cv2.CAP_PROP_FOURCC))
+        fourcc_str = "".join(chr((fourcc_int >> 8 * i) & 0xFF) for i in range(4)) or "?"
+        actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
+        actual_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        actual_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        print(f"[WebcamSource] negotiated: fourcc={fourcc_str} fps={actual_fps} resolution={actual_w}x{actual_h}")
 
     def read(self):
         ret, frame = self.cap.read()
