@@ -33,59 +33,16 @@ def _get_tracker(tracker_key):
         # downloading) construction again on every frame
         raise RuntimeError(_TRACKER_ERRORS[tracker_key])
 
-    from pathlib import Path
     import torch
 
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
-
-    # boxmot's own auto-downloader targets its package-relative WEIGHTS
-    # folder - that's what its example/CLI code points reid_weights at.
-    # A bare relative filename (no resolved directory) is what silently
-    # produced reid_model=None before: nothing on disk at that path, and
-    # apparently no download triggered from it either.
-    try:
-        from boxmot.utils import WEIGHTS
-        reid_weights_path = WEIGHTS / "osnet_x0_25_msmt17.pt"
-    except Exception:
-        reid_weights_path = Path("osnet_x0_25_msmt17.pt")
 
     try:
         if tracker_key == "ocsort":
             from boxmot.trackers.bbox import OcSort
             tracker = OcSort()
         elif tracker_key == "deepsort":
-            from boxmot.trackers.bbox import DeepOcSort
-            tracker = DeepOcSort(
-                reid_weights=reid_weights_path,
-                device=device,
-                half=False,
-            )
-
-            # DeepOcSort's constructor does NOT raise if the ReID weights
-            # fail to load or auto-download (e.g. no internet access at
-            # runtime, or this boxmot version expects the weights placed
-            # somewhere other than reid_weights_path) - it silently falls
-            # back to reid_model=None and then produces empty tracking
-            # output on every single frame, which is exactly what "DeepSORT
-            # shows nothing at all" looked like, with no error anywhere.
-            # Failing loudly here, the moment it happens, turns that into
-            # a visible notice instead.
-            if getattr(tracker, "reid_model", None) is None:
-                raise RuntimeError(
-                    f"DeepSORT's ReID weights did not load from "
-                    f"{reid_weights_path} - boxmot silently falls back to a "
-                    f"non-functional tracker instead of raising, which is why "
-                    f"nothing was appearing on screen. This usually means the "
-                    f"auto-download failed (check internet access on this "
-                    f"machine) or your installed boxmot version expects the "
-                    f"weights somewhere else. Try downloading "
-                    f"osnet_x0_25_msmt17.pt yourself and placing it at exactly "
-                    f"that path, or run `python3 -c \"from boxmot import "
-                    f"DeepOcSort; DeepOcSort(reid_weights='{reid_weights_path}', "
-                    f"device='cpu', half=False)\"` in your terminal (with the "
-                    f"venv active) to see boxmot's own warning/error output "
-                    f"directly."
-                )
+            tracker = _build_deepsort(device)
         else:
             raise ValueError(f"Unknown custom tracker: {tracker_key}")
     except Exception as e:
@@ -94,6 +51,56 @@ def _get_tracker(tracker_key):
 
     _TRACKER_INSTANCES[tracker_key] = tracker
     return tracker
+
+
+def _build_deepsort(device):
+    """Tries boxmot's ReID weight loading two different ways - both are
+    real, documented usages that just vary by boxmot version - and only
+    falls back to embedding_off=True (boxmot's own fully-supported
+    motion-only mode, same association logic as OC-SORT) if NEITHER
+    actually produces a loaded reid_model. This means DeepSORT always ends
+    up usable, even on a machine/boxmot version where the appearance
+    ReID weights can't be resolved automatically - degraded re-id is far
+    better than a tracker that silently produces nothing at all."""
+    from pathlib import Path
+    from boxmot.trackers.bbox import DeepOcSort
+
+    attempts = []
+    try:
+        from boxmot.utils import WEIGHTS
+        attempts.append(WEIGHTS / "osnet_x0_25_msmt17.pt")
+    except Exception:
+        pass
+    # Bare filename (no directory) - this is the form boxmot's own CLI/
+    # example scripts pass; some versions only recognize the auto-download
+    # name as an exact string match and won't trigger on a Path object
+    # pointing at the same file, which looks like what happened here: a
+    # stable connection, but still reid_model=None with the Path form.
+    attempts.append("osnet_x0_25_msmt17.pt")
+
+    for weights in attempts:
+        tracker = DeepOcSort(reid_weights=weights, device=device, half=False)
+        if getattr(tracker, "reid_model", None) is not None:
+            return tracker
+
+    print(
+        "[custom_trackers] DeepSORT's ReID weights (osnet_x0_25_msmt17.pt) "
+        f"could not be loaded automatically (tried: {[str(a) for a in attempts]}). "
+        "Falling back to DeepSORT's motion-only mode (embedding_off=True) - "
+        "tracking still works, just without appearance-based re-identification. "
+        "For full DeepSORT, download osnet_x0_25_msmt17.pt yourself and place "
+        f"it at {attempts[0]}."
+    )
+    try:
+        return DeepOcSort(reid_weights=Path("osnet_x0_25_msmt17.pt"), device=device, half=False, embedding_off=True)
+    except Exception as e:
+        raise RuntimeError(
+            "DeepSORT could not be constructed at all, even in motion-only "
+            f"mode (embedding_off=True): {e}. This points to a boxmot "
+            "installation/version issue beyond just the ReID weights - check "
+            "`pip show boxmot` and that DeepOcSort is available in your "
+            "installed version."
+        ) from e
 
 
 def track(tracker_key, frame, boxes):

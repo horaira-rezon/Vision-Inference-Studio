@@ -528,8 +528,9 @@ class MainApp(ctk.CTkFrame):
             if not video_dir:
                 self._show_notice("Select a video folder first", "error")
                 return
-            if self.current_frame is not None:
-                self.recorder.start_recording(self.current_frame, video_dir)
+            frame = self._render_full_overlay_frame()
+            if frame is not None:
+                self.recorder.start_recording(frame, video_dir)
                 self.record_btn.configure(text="Stop Recording")
                 self.recording_start_time = time.time()
                 self._update_recording_notice()
@@ -560,9 +561,22 @@ class MainApp(ctk.CTkFrame):
         # schedule next update
         self._recording_after_id = self.after(1000, self._update_recording_notice)
 
+    def _render_full_overlay_frame(self):
+        """Builds one native-resolution, fully-overlaid frame on demand
+        from the most recent raw frame + plan - the same thing the old
+        per-frame native-res pass produced, just computed only when
+        actually needed (a screenshot click, or the moment recording
+        starts) instead of on every single loop tick regardless of
+        whether anything needed it."""
+        if self._raw_frame is None or self._last_plan is None:
+            return None
+        frame = self._transform_display_image(self._raw_frame.copy())
+        self._apply_render_plan(frame, self._last_plan, scale=1.0)
+        return frame
+
     def take_screenshot(self):
         """Full overlay - exactly what's on screen / recorded to video."""
-        self._save_screenshot(self.current_frame)
+        self._save_screenshot(self._render_full_overlay_frame())
 
     def take_screenshot_clean(self):
         """No UI elements at all - the raw camera frame."""
@@ -591,11 +605,13 @@ class MainApp(ctk.CTkFrame):
 
     # ----------------------------------------------------------- mouse
     def _on_click(self, event):
-        if self.current_frame is None:
+        if self._raw_frame is None:
             return
         display_x = int(event.x / self.display_scale)
         display_y = int(event.y / self.display_scale)
-        raw_h, raw_w = self.current_frame.shape[:2]
+        raw_h, raw_w = self._raw_frame.shape[:2]
+        if self.rotation_angle in (90, 270):
+            raw_h, raw_w = raw_w, raw_h
         raw_x, raw_y = self._inverse_transform_point(display_x, display_y, raw_w, raw_h)
         self.mouse_x = raw_x
         self.mouse_y = raw_y
@@ -630,13 +646,19 @@ class MainApp(ctk.CTkFrame):
             )  # clean, no overlay - for screenshot variants
             self._last_plan = plan
 
-            # Native-resolution pass: what gets recorded/screenshotted -
-            # unchanged from before, same resolution as the raw camera feed.
-            record_image = raw_image.copy()
-            record_image = self._transform_display_image(record_image)
-            self._apply_render_plan(record_image, plan, scale=1.0)
-            self.current_frame = record_image
-            self.recorder.write_frame(record_image)
+            # Native-resolution pass: only needed while actively recording -
+            # every other consumer (the full-overlay screenshot button,
+            # and the frame recording starts on) renders this same plan
+            # on demand instead (_render_full_overlay_frame), so this real
+            # per-frame cost - box brackets/labels/lines/text, all at full
+            # camera resolution - isn't paid on every tick when nothing
+            # needs it.
+            if self.recorder.recording:
+                record_image = raw_image.copy()
+                record_image = self._transform_display_image(record_image)
+                self._apply_render_plan(record_image, plan, scale=1.0)
+                self.current_frame = record_image
+                self.recorder.write_frame(record_image)
 
             # Display pass: resize the CLEAN raw frame first, then draw the
             # same plan directly at that resolution (scaled coordinates,

@@ -17,6 +17,27 @@ class WebcamSource(CameraSource):
         if not self.cap.isOpened():
             raise RuntimeError(f"Could not open webcam at index {self.index}")
 
+        # Most USB webcams default to an uncompressed (YUYV) capture mode,
+        # which is USB-bandwidth-limited and commonly caps out around
+        # 10-15fps once you're above a small resolution - this matches
+        # "stuck around 10fps" exactly. MJPG is still a real per-frame
+        # JPEG (no quality loss beyond normal JPEG compression), just far
+        # smaller over the wire, which is what actually lets the same
+        # hardware run at its higher advertised framerates. FOURCC has to
+        # be set before FPS/resolution: V4L2 only advertises the higher
+        # rates for the modes that support them (this one), so setting it
+        # after can end up silently ignored by the driver.
+        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        self.cap.set(cv2.CAP_PROP_FPS, 30)
+        # Only ever keep the newest frame waiting rather than letting a
+        # backlog build up if something downstream is briefly slow - same
+        # "always work with the latest thing" principle DetectionWorker
+        # already follows for inference.
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        # cap.set() calls above are best-effort: on hardware/drivers that
+        # don't support a given mode they simply fail and leave whatever
+        # was already negotiated in place - never raises, never crashes.
+
     def read(self):
         ret, frame = self.cap.read()
         if not ret:
