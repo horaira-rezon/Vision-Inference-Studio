@@ -17,7 +17,7 @@ class RootController:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Camera Dashboard")
+        self.root.title("Vision Inference Studio")
         self.root.geometry("1600x900")
         self.root.minsize(900, 550)
 

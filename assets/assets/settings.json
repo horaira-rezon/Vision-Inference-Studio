@@ -1,17 +1,7 @@
 {
   "video_output_dir": "/home/allsabaab/Downloads/others",
   "screenshot_output_dir": "/home/allsabaab/Downloads/others",
-  "arduino_port": "/dev/ttyACM0",
-  "arduino_baud": 115200,
-  "steps_per_degree": 1.1111111111111112,
-  "command_delay": 0.1,
-  "actuation_mode": "none",
-  "diagonal_distance_on": false,
-  "x_axis_slider": 0.5,
   "tracker_mode": "deepocsort",
   "confidence_threshold": 50,
-  "fps_viewer_on": true,
-  "multi_box_count": 1,
-  "axis_quadrants": {},
-  "multi_box_quadrants": {}
+  "fps_viewer_on": true
 }

@@ -20,7 +20,7 @@ class SetupScreen(ctk.CTkFrame):
         inner.pack(fill="both", expand=True, padx=37, pady=37)
 
         ctk.CTkLabel(
-            inner, text="Camera Dashboard",
+            inner, text="Vision Inference Studio",
             font=ctk.CTkFont(size=50, weight="bold")
         ).pack(pady=(0, 22))
 

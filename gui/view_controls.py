@@ -24,7 +24,6 @@ class ViewControls(ctk.CTkScrollableFrame):
         self._build_grayscale_section()
         self._build_binary_section()
         self._build_depth_section()
-        self._build_thermal_section()
 
     def _reset_orientation(self):
         self.app.rotation_angle = 0
@@ -196,18 +195,6 @@ class ViewControls(ctk.CTkScrollableFrame):
             self,
             text="Threshold Settings",
             command=self.app.open_threshold_settings,
-            font=self.button_font,
-            fg_color="#374151",
-            hover_color="#4b5563",
-        ).pack(fill="x", padx=16, pady=(0, 4))
-
-    def _build_thermal_section(self):
-        self._section_label("Thermal / Infrared")
-
-        ctk.CTkButton(
-            self,
-            text="Thermal View",
-            command=self.app.show_thermal_channel,
             font=self.button_font,
             fg_color="#374151",
             hover_color="#4b5563",
