@@ -9,6 +9,5 @@ __pycache__/
 *.pyc
 
 # Private local files
-/private-drafts/
 .claude/
 /assets/assets/
