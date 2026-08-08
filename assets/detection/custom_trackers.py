@@ -54,71 +54,56 @@ def _get_tracker(tracker_key):
 
 
 def _build_deepsort(device):
-    """Tries boxmot's ReID weight loading two different ways - both are
-    real, documented usages that just vary by boxmot version - and only
-    falls back to embedding_off=True (boxmot's own fully-supported
-    motion-only mode, same association logic as OC-SORT) if NEITHER
-    actually produces a loaded reid_model. This means DeepSORT always ends
-    up usable, even on a machine/boxmot version where the appearance
-    ReID weights can't be resolved automatically - degraded re-id is far
-    better than a tracker that silently produces nothing at all."""
-    from pathlib import Path
+    """Builds a real ReID backend via boxmot's ReID class and hands the
+    resulting *backend object* to DeepOcSort as reid_model=. DeepOcSort's
+    constructor has no reid_weights/device/half parameters at all (those
+    only exist on boxmot's higher-level create_tracker() registry helper,
+    which is what internally turns reid_weights into a ReID(...).model and
+    passes THAT in as reid_model) - so passing reid_weights=/device=/half=
+    straight into DeepOcSort(), like every previous attempt here did,
+    silently vanishes into **kwargs and is never used. That's the whole
+    story: reid_model was staying None because no ReID backend was ever
+    being constructed in the first place, not because of a bad download,
+    a filename-registry collision, or a wrapped checkpoint - the weights
+    file itself was fine the whole time.
+
+    Falls back to embedding_off=True (boxmot's own fully-supported
+    motion-only mode, same association logic as OC-SORT) only if a real
+    ReID backend genuinely can't be built - so DeepSORT always ends up
+    usable, even on a machine where the appearance weights can't be
+    resolved at all."""
+    from boxmot.reid.core import ReID
     from boxmot.trackers.bbox import DeepOcSort
+    from boxmot.utils import WEIGHTS
 
-    attempts = []
-    try:
-        from boxmot.utils import WEIGHTS
-        attempts.append(WEIGHTS / "osnet_x0_25_msmt17.pt")
-    except Exception:
-        pass
-    # Bare filename (no directory) - this is the form boxmot's own CLI/
-    # example scripts pass; some versions only recognize the auto-download
-    # name as an exact string match and won't trigger on a Path object
-    # pointing at the same file, which looks like what happened here: a
-    # stable connection, but still reid_model=None with the Path form.
-    attempts.append("osnet_x0_25_msmt17.pt")
+    weights_path = WEIGHTS / "osnet_x0_25_msmt17.pt"
 
-    for weights in attempts:
-        tracker = DeepOcSort(reid_weights=weights, device=device, half=False)
-        if getattr(tracker, "reid_model", None) is not None:
-            return tracker
+    if not weights_path.exists():
+        _try_download_reid_weights(weights_path)
 
-    # boxmot's own registered download source for this exact file has a
-    # long, well-documented history of dead/rate-limited links (it was
-    # originally Google-Drive-hosted, going back to the torchreid project
-    # this is descended from - see e.g. github.com/mikel-brostrom/boxmot
-    # issues #781, #1154, #944 for the same "silently fails to load"
-    # pattern with different weights files). A stable connection but still
-    # reid_model=None points at that, not at anything local. Rather than
-    # keep guessing at boxmot's internal download mechanism, fetch a known
-    # copy ourselves from a couple of verified-to-exist mirrors. This is
-    # safe even if a mirror turns out to be the wrong file/architecture:
-    # boxmot's own loader below is what actually validates it (matching
-    # state_dict keys/shapes), so a bad download just fails to load and
-    # falls through to the same motion-only fallback as before - it can
-    # never silently produce corrupt/wrong embeddings.
-    target = attempts[0] if attempts and isinstance(attempts[0], Path) else Path("osnet_x0_25_msmt17.pt")
-    if _try_download_reid_weights(target):
+    if weights_path.exists():
         try:
-            tracker = DeepOcSort(reid_weights=target, device=device, half=False)
-            if getattr(tracker, "reid_model", None) is not None:
+            # Build the backend ourselves, then hand the *object* (not the
+            # path) to DeepOcSort - this is the "reid_model: Pre-built ReID
+            # backend model (e.g. ReID(...).model)" usage documented on
+            # DeepOcSort itself.
+            reid_backend = ReID(path=weights_path, device=device, half=False).model
+            tracker = DeepOcSort(reid_model=reid_backend)
+            if getattr(tracker, "model", None) is not None:
                 return tracker
-            print(f"[custom_trackers] downloaded {target} but DeepOcSort still reports reid_model=None after loading it")
+            print(f"[custom_trackers] built a ReID backend from {weights_path} but DeepOcSort.model is still None after passing it in as reid_model - inspecting the checkpoint")
+            _inspect_checkpoint(weights_path)
         except Exception as e:
-            print(f"[custom_trackers] downloaded {target} but DeepOcSort raised loading it: {type(e).__name__}: {e}")
+            print(f"[custom_trackers] failed to build/load a ReID backend from {weights_path}: {type(e).__name__}: {e}")
 
     print(
         "[custom_trackers] DeepSORT's ReID weights (osnet_x0_25_msmt17.pt) "
-        f"could not be loaded automatically (tried boxmot's own resolution: "
-        f"{[str(a) for a in attempts]}, and a direct download from a couple "
-        "of known mirrors). Falling back to DeepSORT's motion-only mode "
-        "(embedding_off=True) - tracking still works, just without "
-        "appearance-based re-identification. See this session's reply for "
-        "how to check exactly why boxmot's own download is failing, and "
-        f"where to place a manually-downloaded copy ({target})."
+        f"could not be loaded (expected at {weights_path}). Falling back to "
+        "DeepSORT's motion-only mode (embedding_off=True) - tracking still "
+        "works, just without appearance-based re-identification."
     )
     try:
-        return DeepOcSort(reid_weights=Path("osnet_x0_25_msmt17.pt"), device=device, half=False, embedding_off=True)
+        return DeepOcSort(embedding_off=True)
     except Exception as e:
         raise RuntimeError(
             "DeepSORT could not be constructed at all, even in motion-only "
@@ -172,6 +157,38 @@ def _try_download_reid_weights(target_path):
             target_path.unlink(missing_ok=True)
             continue
     return False
+
+
+def _inspect_checkpoint(path):
+    """Loads the .pt file ourselves, independent of boxmot, and prints
+    what's actually inside it - top-level type/keys, and a few state_dict
+    key names if there's something state_dict-shaped. This is diagnostic
+    only (never raises out to the caller): if DeepOcSort still won't use
+    a SHA256-verified-correct file even under a non-registry filename,
+    the next real question is whether the checkpoint is wrapped in an
+    extra layer (e.g. {"state_dict": {...}} or {"model": ...} instead of
+    a bare state_dict) or uses different key naming than this boxmot
+    version's OSNet class expects - either of which would explain
+    reid_model staying None without boxmot necessarily raising."""
+    try:
+        import torch
+        ckpt = torch.load(path, map_location="cpu", weights_only=False)
+        if isinstance(ckpt, dict):
+            keys = list(ckpt.keys())
+            print(f"[custom_trackers] checkpoint is a dict with {len(keys)} top-level keys, first few: {keys[:10]}")
+            # a bare state_dict looks like {"conv1.conv.weight": tensor, ...} -
+            # lots of dotted param-name keys. A wrapped checkpoint looks like
+            # {"state_dict": {...}} or {"model": ..., "epoch": ...} - few
+            # top-level keys, none of them tensors.
+            sample = keys[0] if keys else None
+            if sample is not None and hasattr(ckpt[sample], "shape"):
+                print("[custom_trackers] looks like a bare state_dict (values are tensors)")
+            else:
+                print(f"[custom_trackers] does NOT look like a bare state_dict - value type for '{sample}' is {type(ckpt.get(sample)).__name__ if sample else '?'}. This is likely why loading silently produced nothing: boxmot's OSNet loader may expect the state_dict directly, not wrapped inside this key.")
+        else:
+            print(f"[custom_trackers] checkpoint top-level type is {type(ckpt).__name__}, not a dict at all")
+    except Exception as e:
+        print(f"[custom_trackers] could not even torch.load {path} ourselves: {type(e).__name__}: {e}")
 
 
 def track(tracker_key, frame, boxes):
