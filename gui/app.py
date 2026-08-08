@@ -5,6 +5,7 @@ import cv2
 import time
 import threading
 import os
+from collections import deque
 
 from assets.camera.manager import CameraManager
 from assets.detection.detection_worker import DetectionWorker
@@ -50,6 +51,7 @@ class MainApp(ctk.CTkFrame):
         self.fps = 0.0
         self._last_frame_time = None
         self._frame_after_id = None
+        self._display_timestamps = deque(maxlen=120)
         self.config_window = None
         self.display_scale = 1.0
         self.flip_vertical_enabled = False
@@ -191,7 +193,8 @@ class MainApp(ctk.CTkFrame):
         self._show_notice(f"Camera ready: {choice}", "ok")
         self.media_view.show_file_controls(False)
         self.media_finished = False
-        self._last_frame_time = None
+        self._display_timestamps.clear()
+        self.fps = 0.0
         self.update_frame()
 
     def _select_video_file(self):
@@ -212,7 +215,8 @@ class MainApp(ctk.CTkFrame):
             self.media_view.show_file_controls(True)
             self.media_view.set_paused(False)
             self.media_view.set_slider(0, source.frame_count)
-            self._last_frame_time = None
+            self._display_timestamps.clear()
+            self.fps = 0.0
             self.update_frame()
         except Exception as e:
             self._set_dot(self.left_sidebar.camera_dot, "error")
@@ -236,7 +240,8 @@ class MainApp(ctk.CTkFrame):
             self.media_view.show_file_controls(False)
             self.media_view.play_button.configure(state="disabled")
             self.media_view.slider.configure(state="disabled")
-            self._last_frame_time = None
+            self._display_timestamps.clear()
+            self.fps = 0.0
             self.update_frame()
         except Exception as e:
             self._set_dot(self.left_sidebar.camera_dot, "error")
@@ -525,22 +530,34 @@ class MainApp(ctk.CTkFrame):
     def update_frame(self):
         if self.media_kind is None:
             return
+        start = time.perf_counter()
         raw_image, depth_frame, cx, cy = self._read_source()
         if raw_image is not None:
-            now = time.perf_counter()
-            if self._last_frame_time is not None:
-                dt = now - self._last_frame_time
-                if dt > 0:
-                    inst = 1.0 / dt
-                    self.fps = inst if self.fps == 0 else self.fps * 0.9 + inst * 0.1
-            self._last_frame_time = now
             self._process_and_display(raw_image, depth_frame, cx, cy)
-        delay = max(1, int(1000 / self.media_source.fps)) if self.media_kind == "video" and self.media_source is not None and not self.media_source.paused else 1
+            now = time.perf_counter()
+            self._display_timestamps.append(now)
+            cutoff = now - 1.0
+            while self._display_timestamps and self._display_timestamps[0] < cutoff:
+                self._display_timestamps.popleft()
+            if len(self._display_timestamps) >= 2:
+                elapsed = self._display_timestamps[-1] - self._display_timestamps[0]
+                self.fps = (len(self._display_timestamps) - 1) / elapsed if elapsed > 0 else 0.0
+            elif len(self._display_timestamps) == 1:
+                self.fps = 0.0
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        if self.media_kind == "video" and self.media_source is not None and not self.media_source.paused:
+            source_fps = max(float(getattr(self.media_source, "fps", 30.0) or 30.0), 1.0)
+            delay = max(1, int(1000.0 / source_fps - elapsed_ms))
+        else:
+            delay = 1
         self._frame_after_id = self.after(delay, self.update_frame)
 
     def _process_and_display(self, raw_image, depth_frame, cx, cy):
-        self._raw_frame = raw_image.copy()
-        result = self._infer(raw_image)
+        self._raw_frame = raw_image
+        if self.model is None or self.detection_worker is None:
+            result = {}
+        else:
+            result = self._infer(raw_image)
         self._last_result = result
         display_image = self._transform_display_image(raw_image.copy())
         scale = self._display_scale_for(display_image, raw_image)
@@ -548,7 +565,7 @@ class MainApp(ctk.CTkFrame):
             display_image = cv2.resize(display_image, (max(1, int(display_image.shape[1] * scale)), max(1, int(display_image.shape[0] * scale))), interpolation=cv2.INTER_AREA)
         self.display_scale = scale
         self._draw_result(display_image, result, scale=scale, depth_frame=depth_frame, cx=cx, cy=cy)
-        self._display_frame = display_image.copy()
+        self._display_frame = display_image
         self.media_view.set_image(display_image)
         if self.recorder.recording:
             native = self._transform_display_image(raw_image.copy())

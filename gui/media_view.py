@@ -7,7 +7,7 @@ class MediaView:
         self.app = app
         self.outer = ctk.CTkFrame(parent, corner_radius=0, fg_color="#0b0d10")
         self.outer.grid(row=0, column=1, sticky="nsew")
-        self.label = tk.Label(self.outer, bg="#0b0d10", fg="white", text="Select a camera to begin", font=("Arial", 14))
+        self.label = tk.Label(self.outer, bg="#0b0d10", fg="white", text="Select a camera to begin!", font=("Arial", 14))
         self.label.place(relx=0.5, rely=0.5, anchor="center")
         self.label.bind("<Button-1>", app._on_click)
         self.controls = ctk.CTkFrame(self.outer, fg_color="transparent")

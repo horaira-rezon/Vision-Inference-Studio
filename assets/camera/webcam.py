@@ -12,6 +12,7 @@ class WebcamSource(CameraSource):
         self._thread = None
         self.capture_fps = 0.0
         self.requested_fps = 60
+        self._frame_counter = 0
 
     def start(self):
         self.cap = cv2.VideoCapture(self.index, cv2.CAP_V4L2)
@@ -22,6 +23,7 @@ class WebcamSource(CameraSource):
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self.cap.set(cv2.CAP_PROP_FPS, self.requested_fps)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        self.cap.set(cv2.CAP_PROP_CONVERT_RGB, 1)
         fourcc_int = int(self.cap.get(cv2.CAP_PROP_FOURCC))
         fourcc_str = "".join(chr((fourcc_int >> 8 * i) & 0xFF) for i in range(4)) or "?"
         actual_fps = float(self.cap.get(cv2.CAP_PROP_FPS) or 0.0)
@@ -47,6 +49,7 @@ class WebcamSource(CameraSource):
                     fps = inst if fps == 0.0 else fps * 0.85 + inst * 0.15
             last_time = now
             self.capture_fps = fps
+            self._frame_counter += 1
             h, w = frame.shape[:2]
             self._buffer.publish((frame, None, w // 2, h // 2))
 
@@ -66,6 +69,7 @@ class WebcamSource(CameraSource):
         self._thread = None
         self._buffer.clear()
         self.capture_fps = 0.0
+        self._frame_counter = 0
 
     @property
     def has_depth(self):

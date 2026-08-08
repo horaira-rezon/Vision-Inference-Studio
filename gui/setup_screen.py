@@ -32,7 +32,7 @@ class SetupScreen(ctk.CTkFrame):
         self._make_card(
             inner,
             title="Local Setup",
-            subtitle="Use this computer's Webcam or an external Camera",
+            subtitle="Use this computer's webcam or an external camera",
             command=self._choose_local,
             accent="#2563eb",
         )
@@ -40,7 +40,7 @@ class SetupScreen(ctk.CTkFrame):
         self._make_card(
             inner,
             title="Remote Setup",
-            subtitle="Stream from a Raspberry Pi remotely ~ coming soon",
+            subtitle="Stream from a remote computer ~ coming soon",
             command=self._choose_remote,
             accent="#cb2d2d",
         )
