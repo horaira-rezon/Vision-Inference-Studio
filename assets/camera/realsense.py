@@ -1,5 +1,6 @@
 import numpy as np
-from assets.camera.base import CameraSource
+import threading
+from assets.camera.base import CameraSource, LatestFrameBuffer
 
 try:
     import pyrealsense2 as rs
@@ -14,6 +15,9 @@ class RealSenseSource(CameraSource):
         self.pipeline = None
         self.align = None
         self.intrinsics = None
+        self._buffer = LatestFrameBuffer()
+        self._running = False
+        self._thread = None
 
     def start(self):
         self.pipeline = rs.pipeline()
@@ -24,17 +28,32 @@ class RealSenseSource(CameraSource):
         color_stream = profile.get_stream(rs.stream.color).as_video_stream_profile()
         self.intrinsics = color_stream.get_intrinsics()
         self.align = rs.align(rs.stream.color)
+        self._running = True
+        self._thread = threading.Thread(target=self._capture_loop, daemon=True)
+        self._thread.start()
+
+    def _capture_loop(self):
+        while self._running and self.pipeline is not None:
+            try:
+                frames = self.pipeline.wait_for_frames()
+                aligned = self.align.process(frames)
+                depth_frame = aligned.get_depth_frame()
+                color_frame = aligned.get_color_frame()
+                if not depth_frame or not color_frame:
+                    continue
+                image = np.asanyarray(color_frame.get_data()).copy()
+                cx, cy = int(self.intrinsics.ppx), int(self.intrinsics.ppy)
+                self._buffer.publish((image, depth_frame, cx, cy))
+            except Exception:
+                if self._running:
+                    continue
+                break
 
     def read(self):
-        frames = self.pipeline.wait_for_frames()
-        aligned = self.align.process(frames)
-        depth_frame = aligned.get_depth_frame()
-        color_frame = aligned.get_color_frame()
-        if not depth_frame or not color_frame:
+        value = self._buffer.read()
+        if value is None:
             return None, None, None, None
-        image = np.asanyarray(color_frame.get_data())
-        cx, cy = int(self.intrinsics.ppx), int(self.intrinsics.ppy)
-        return image, depth_frame, cx, cy
+        return value
 
     def get_depth_meters(self, x=None, y=None, depth_frame=None):
         if depth_frame is None:
@@ -49,9 +68,17 @@ class RealSenseSource(CameraSource):
         return depth if depth > 0 else None
 
     def stop(self):
+        self._running = False
         if self.pipeline:
-            self.pipeline.stop()
+            try:
+                self.pipeline.stop()
+            except Exception:
+                pass
             self.pipeline = None
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=1.0)
+        self._thread = None
+        self._buffer.clear()
 
     @property
     def has_depth(self):

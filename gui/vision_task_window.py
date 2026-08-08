@@ -14,7 +14,7 @@ class VisionTaskWindow(ctk.CTkToplevel):
 
     def _choose(self, task):
         self.destroy()
-        ArchitectureWindow(self.master, task, self.on_task_selected)
+        self.on_task_selected(task)
 
 class ArchitectureWindow(ctk.CTkToplevel):
     def __init__(self, master, task, on_selected):
@@ -25,7 +25,8 @@ class ArchitectureWindow(ctk.CTkToplevel):
         self.task = task
         self.on_selected = on_selected
         ctk.CTkLabel(self, text="Select Model Architecture", font=ctk.CTkFont(size=18, weight="bold")).pack(padx=20, pady=(24,16))
-        for key, label in architecture_choices(task):
+        choices = architecture_choices(task)
+        for key, label in choices:
             ctk.CTkButton(self, text=label, command=lambda k=key: self._choose(k)).pack(fill="x", padx=28, pady=6)
 
     def _choose(self, architecture):

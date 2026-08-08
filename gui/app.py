@@ -18,7 +18,7 @@ from gui.view_controls import ViewControls
 from gui.left_sidebar import LeftSidebar
 from gui.media_view import MediaView
 from gui.input_dialogs import ChoiceWindow
-from gui.vision_task_window import VisionTaskWindow
+from gui.vision_task_window import VisionTaskWindow, ArchitectureWindow
 from models.factory import create_model
 
 NOTICE_COLORS = {
@@ -35,7 +35,6 @@ class MainApp(ctk.CTkFrame):
         self.settings = settings
         self.camera_manager = CameraManager()
         self.camera_source = None
-        self.camera_locked = False
         self.media_kind = None
         self.media_source = None
         self.media_frame = None
@@ -87,6 +86,23 @@ class MainApp(ctk.CTkFrame):
         self.media_view = MediaView(self, self)
         self.video_frame = self.media_view.outer
         self.video_label = self.media_view.label
+        self.NOTICE_MARGIN = 40
+        self.notice_bar = ctk.CTkLabel(
+            self.video_frame,
+            text="",
+            font=ctk.CTkFont(size=20),
+            fg_color="transparent",
+            text_color=NOTICE_COLORS["idle"],
+            justify="center",
+        )
+        self.notice_bar.place(
+            relx=0.5,
+            rely=1.0,
+            anchor="center",
+            y=-(self.media_view.bottom_gap // 2),
+        )
+        self.video_frame.bind("<Configure>", self._update_notice_wraplength)
+        self.after(50, self._update_notice_wraplength)
         self.right_sidebar_container = ctk.CTkFrame(self, width=320, corner_radius=0, fg_color="#1a1d23")
         self.right_sidebar_container.grid(row=0, column=2, sticky="nse")
         self.right_sidebar_container.grid_propagate(False)
@@ -103,14 +119,24 @@ class MainApp(ctk.CTkFrame):
             return None
         return path if len(path) <= max_len else "..." + path[-(max_len - 3):]
 
+    def _update_notice_wraplength(self, event=None):
+        width = self.video_frame.winfo_width()
+        if width > 1:
+            self.notice_bar.configure(wraplength=max(200, width - self.NOTICE_MARGIN * 2))
+
     def _show_notice(self, text, color_key="ok"):
-        return
+        self.notice_bar.configure(
+            text=text,
+            text_color=NOTICE_COLORS.get(color_key, NOTICE_COLORS["idle"]),
+        )
+        self.notice_bar.lift()
+        self.after(4000, lambda: self.notice_bar.configure(text=""))
 
     def select_camera(self):
         picker = ChoiceWindow(
             self.master,
-            "Camera",
-            "Select Camera Input",
+            "Inference Input",
+            "Select Inference Input",
             [
                 ("live", "Live Camera"),
                 ("video", "Video File"),
@@ -132,8 +158,6 @@ class MainApp(ctk.CTkFrame):
             self._select_image_file()
 
     def _select_live_camera(self):
-        if self.camera_locked:
-            return
         self.media_kind = "live"
         self._show_notice("Scanning for cameras...", "warn")
         self.camera_manager.scan_async(self._on_scan_complete)
@@ -141,6 +165,7 @@ class MainApp(ctk.CTkFrame):
     def _on_scan_complete(self, options):
         if not options:
             self._set_dot(self.left_sidebar.camera_dot, "error")
+            self._show_notice("No camera detected", "error")
             return
         if len(options) == 1:
             self._start_camera(options[0])
@@ -156,13 +181,14 @@ class MainApp(ctk.CTkFrame):
         try:
             self._stop_current_source()
             self.camera_source = self.camera_manager.build(choice)
-        except Exception:
+        except Exception as e:
             self._set_dot(self.left_sidebar.camera_dot, "error")
+            self._show_notice(str(e), "error")
             return
         self.media_kind = "live"
-        self.camera_locked = True
-        self.left_sidebar.camera_btn.configure(state="disabled", text="Camera Locked")
+        self.left_sidebar.camera_btn.configure(state="normal", text="Select input")
         self._set_dot(self.left_sidebar.camera_dot, "ok")
+        self._show_notice(f"Camera ready: {choice}", "ok")
         self.media_view.show_file_controls(False)
         self.media_finished = False
         self._last_frame_time = None
@@ -180,16 +206,17 @@ class MainApp(ctk.CTkFrame):
             self.media_kind = "video"
             self.media_frame = None
             self.media_finished = False
-            self.camera_locked = True
-            self.left_sidebar.camera_btn.configure(state="disabled", text="Camera Locked")
+            self.left_sidebar.camera_btn.configure(state="normal", text="Select input")
             self._set_dot(self.left_sidebar.camera_dot, "ok")
+            self._show_notice(f"Video loaded: {os.path.basename(path)}", "ok")
             self.media_view.show_file_controls(True)
             self.media_view.set_paused(False)
             self.media_view.set_slider(0, source.frame_count)
             self._last_frame_time = None
             self.update_frame()
-        except Exception:
+        except Exception as e:
             self._set_dot(self.left_sidebar.camera_dot, "error")
+            self._show_notice(str(e), "error")
 
     def _select_image_file(self):
         path = choose_file("Select Image File", pattern="*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.webp", pattern_label="Image Files")
@@ -203,18 +230,25 @@ class MainApp(ctk.CTkFrame):
             self.media_kind = "image"
             self.media_frame = source.image.copy()
             self.media_finished = False
-            self.camera_locked = True
-            self.left_sidebar.camera_btn.configure(state="disabled", text="Camera Locked")
+            self.left_sidebar.camera_btn.configure(state="normal", text="Select input")
             self._set_dot(self.left_sidebar.camera_dot, "ok")
-            self.media_view.show_file_controls(True)
+            self._show_notice(f"Image loaded: {os.path.basename(path)}", "ok")
+            self.media_view.show_file_controls(False)
             self.media_view.play_button.configure(state="disabled")
             self.media_view.slider.configure(state="disabled")
             self._last_frame_time = None
             self.update_frame()
-        except Exception:
+        except Exception as e:
             self._set_dot(self.left_sidebar.camera_dot, "error")
+            self._show_notice(str(e), "error")
 
     def _stop_current_source(self):
+        if self._frame_after_id is not None:
+            try:
+                self.after_cancel(self._frame_after_id)
+            except Exception:
+                pass
+            self._frame_after_id = None
         if self.camera_source is not None:
             try:
                 self.camera_source.stop()
@@ -231,11 +265,37 @@ class MainApp(ctk.CTkFrame):
     def select_vision_task(self):
         VisionTaskWindow(self.master, self._on_task_selected)
 
-    def _on_task_selected(self, task, architecture):
+    def _on_task_selected(self, task):
+        if self.vision_task != task and self.model is not None:
+            self._unload_model()
+        self.vision_task = task
+        self.model_architecture = None
+        self.model_path = None
+        self._last_detection_error = None
+        self._classification_text = []
+        self._set_dot(self.left_sidebar.model_dot, "warn")
+        self._show_notice(f"Vision task selected: {task}", "warn")
+        self.left_sidebar.model_weight_btn.configure(state="normal")
+        self.left_sidebar.unload_tasks_btn.configure(state="disabled")
+        if self.config_window is not None and self.config_window.winfo_exists():
+            self.config_window._refresh_from_settings()
+
+    def select_model_weight(self):
+        if self.vision_task is None:
+            self._show_notice("Select a vision task first", "warn")
+            VisionTaskWindow(self.master, self._on_task_selected)
+            return
+        ArchitectureWindow(self.master, self.vision_task, self._on_architecture_selected)
+
+    def _on_architecture_selected(self, task, architecture):
+        if task != self.vision_task:
+            return
         path = choose_file("Select Model Weight", pattern="*.pt *.pth *.onnx *.safetensors", pattern_label="Model Weights")
         if not path:
             return
         self._set_dot(self.left_sidebar.model_dot, "warn")
+        self._show_notice(f"Loading {architecture} model...", "warn")
+        self.left_sidebar.model_weight_btn.configure(state="disabled")
         threading.Thread(target=self._load_model_async, args=(task, architecture, path), daemon=True).start()
 
     def _load_model_async(self, task, architecture, path):
@@ -246,8 +306,7 @@ class MainApp(ctk.CTkFrame):
             self.after(0, lambda: self._on_model_load_failed())
 
     def _on_model_loaded(self, model, task, architecture, path):
-        if self.detection_worker:
-            self.detection_worker.stop()
+        self._unload_model()
         self.model = model
         self.detection_worker = DetectionWorker(model)
         self.vision_task = task
@@ -257,12 +316,43 @@ class MainApp(ctk.CTkFrame):
             self.settings.set("tracker_mode", "none")
         self._last_detection_error = None
         self._set_dot(self.left_sidebar.model_dot, "ok")
-        self.left_sidebar.model_btn.configure(text="Select a Vision Task")
+        self._show_notice(f"Model loaded: {os.path.basename(path)}", "ok")
+        self.left_sidebar.model_weight_btn.configure(state="normal")
+        self.left_sidebar.unload_tasks_btn.configure(state="normal")
         if self.config_window is not None and self.config_window.winfo_exists():
             self.config_window._refresh_from_settings()
 
     def _on_model_load_failed(self):
+        self._show_notice("Model loading failed", "error")
+        self.left_sidebar.model_weight_btn.configure(state="normal")
+        self.left_sidebar.unload_tasks_btn.configure(state="disabled")
         self._set_dot(self.left_sidebar.model_dot, "error")
+
+    def _unload_model(self):
+        if self.detection_worker:
+            self.detection_worker.stop()
+            self.detection_worker = None
+        if self.model is not None:
+            try:
+                self.model.close()
+            except Exception:
+                pass
+        self.model = None
+        self.model_architecture = None
+        self.model_path = None
+        self._last_result = {}
+        self._classification_text = []
+
+    def unload_all_tasks(self):
+        self._unload_model()
+        self.vision_task = None
+        self._last_detection_error = None
+        self._set_dot(self.left_sidebar.model_dot, "idle")
+        self.left_sidebar.model_weight_btn.configure(state="disabled")
+        self.left_sidebar.unload_tasks_btn.configure(state="disabled")
+        if self.config_window is not None and self.config_window.winfo_exists():
+            self.config_window._refresh_from_settings()
+        self._show_notice("All vision tasks unloaded", "idle")
 
     def open_configuration(self):
         if self.config_window is not None and self.config_window.winfo_exists():
@@ -282,6 +372,7 @@ class MainApp(ctk.CTkFrame):
             return
         self.settings.set("video_output_dir", folder)
         self.left_sidebar.video_folder_label.configure(text=self._short_path(folder))
+        self._show_notice("Video folder set", "ok")
 
     def select_screenshot_folder(self):
         folder = choose_directory("Select folder to save SCREENSHOTS")
@@ -289,16 +380,22 @@ class MainApp(ctk.CTkFrame):
             return
         self.settings.set("screenshot_output_dir", folder)
         self.left_sidebar.screenshot_folder_label.configure(text=self._short_path(folder))
+        self._show_notice("Screenshot folder set", "ok")
 
     def toggle_recording(self):
         if not self.recorder.recording:
             video_dir = self.settings.get("video_output_dir")
-            if not video_dir or self._raw_frame is None:
+            if not video_dir:
+                self._show_notice("Select a video folder first", "error")
+                return
+            if self._raw_frame is None:
+                self._show_notice("No camera frame available to record", "error")
                 return
             frame = self._detection_frame.copy() if self._detection_frame is not None else self._raw_frame.copy()
             self.recorder.start_recording(frame, video_dir)
             self.left_sidebar.record_btn.configure(text="Stop Recording")
             self.recording_start_time = time.time()
+            self._show_notice("Recording started", "warn")
             self._update_recording_notice()
         else:
             self.recorder.stop_recording()
@@ -307,6 +404,7 @@ class MainApp(ctk.CTkFrame):
                 self.after_cancel(self._recording_after_id)
                 self._recording_after_id = None
             self.recording_start_time = None
+            self._show_notice("Recording saved", "ok")
 
     def _update_recording_notice(self):
         if self.recording_start_time is None:
@@ -316,38 +414,59 @@ class MainApp(ctk.CTkFrame):
         hrs, mins = divmod(mins, 60)
         time_str = f"{hrs:02d}:{mins:02d}:{secs:02d}" if hrs else f"{mins:02d}:{secs:02d}"
         self.left_sidebar.record_btn.configure(text=f"Recording: {time_str}")
+        self.notice_bar.configure(text=f"Recording: {time_str}", text_color=NOTICE_COLORS["warn"])
+        self.notice_bar.lift()
         self._recording_after_id = self.after(1000, self._update_recording_notice)
 
     def take_screenshot(self):
         screenshot_dir = self.settings.get("screenshot_output_dir")
         if not screenshot_dir:
+            self._show_notice("Select a screenshot folder first", "error")
             return
         try:
-            x = self.master.winfo_rootx()
-            y = self.master.winfo_rooty()
-            w = self.master.winfo_width()
-            h = self.master.winfo_height()
-            frame = ImageGrab.grab(bbox=(x, y, x+w, y+h))
+            target = self.media_view.label
+            target.update_idletasks()
+            x = target.winfo_rootx()
+            y = target.winfo_rooty()
+            w = target.winfo_width()
+            h = target.winfo_height()
+            if w <= 1 or h <= 1:
+                return
+            frame = ImageGrab.grab(bbox=(x, y, x + w, y + h))
             path = self._next_screenshot_path(screenshot_dir)
             frame.save(path)
+            self._show_notice(f"Screenshot saved: {os.path.basename(path)}", "ok")
         except Exception:
             frame = self._detection_frame
             if frame is not None:
-                self.recorder.save_screenshot(frame, screenshot_dir)
+                path = self.recorder.save_screenshot(frame, screenshot_dir)
+                self._show_notice(f"Screenshot saved: {os.path.basename(path)}", "ok")
+            else:
+                self._show_notice("No camera frame available", "error")
 
     def take_screenshot_clean(self):
         screenshot_dir = self.settings.get("screenshot_output_dir")
-        if not screenshot_dir or self._raw_frame is None:
+        if not screenshot_dir:
+            self._show_notice("Select a screenshot folder first", "error")
             return
-        self.recorder.save_screenshot(self._transform_display_image(self._raw_frame.copy()), screenshot_dir)
+        if self._raw_frame is None:
+            self._show_notice("No camera frame available", "error")
+            return
+        path = self.recorder.save_screenshot(self._transform_display_image(self._raw_frame.copy()), screenshot_dir)
+        self._show_notice(f"Camera frame saved: {os.path.basename(path)}", "ok")
 
     def take_screenshot_boxes_only(self):
         screenshot_dir = self.settings.get("screenshot_output_dir")
-        if not screenshot_dir or self._raw_frame is None:
+        if not screenshot_dir:
+            self._show_notice("Select a screenshot folder first", "error")
+            return
+        if self._raw_frame is None:
+            self._show_notice("No camera frame available", "error")
             return
         frame = self._transform_display_image(self._raw_frame.copy())
         self._draw_result(frame, self._last_result or {}, scale=1.0, boxes_only=True)
-        self.recorder.save_screenshot(frame, screenshot_dir)
+        path = self.recorder.save_screenshot(frame, screenshot_dir)
+        self._show_notice(f"Detection UI screenshot saved: {os.path.basename(path)}", "ok")
 
     def _next_screenshot_path(self, folder):
         os.makedirs(folder, exist_ok=True)
@@ -358,6 +477,7 @@ class MainApp(ctk.CTkFrame):
             return
         paused = self.media_source.toggle_pause()
         self.media_view.set_paused(paused)
+        self._show_notice("Video paused" if paused else "Video resumed", "warn" if paused else "ok")
 
     def seek_media(self, value):
         if self.media_kind != "video" or self.media_source is None:
@@ -368,6 +488,7 @@ class MainApp(ctk.CTkFrame):
         if frame is not None:
             self.media_frame = frame
             self._process_and_display(frame, None, None, None)
+            self._show_notice(f"Video position: {int(float(value)) + 1}", "idle")
 
     def _read_source(self):
         if self.media_kind == "live":
@@ -381,8 +502,17 @@ class MainApp(ctk.CTkFrame):
                 return self.media_frame.copy(), None, None, None
             frame, depth, cx, cy = self.media_source.read()
             if frame is None:
-                self.media_finished = True
+                try:
+                    self.media_source.seek(0)
+                    self.media_source.paused = False
+                    self.media_finished = False
+                    self.media_view.set_paused(False)
+                    frame, depth, cx, cy = self.media_source.read()
+                except Exception:
+                    frame = None
+            if frame is None:
                 return self.media_frame, depth, cx, cy
+            self.media_finished = False
             self.media_frame = frame.copy()
             self.media_view.set_slider(self.media_source.current_index, self.media_source.frame_count)
             return frame, depth, cx, cy
@@ -405,27 +535,25 @@ class MainApp(ctk.CTkFrame):
                     self.fps = inst if self.fps == 0 else self.fps * 0.9 + inst * 0.1
             self._last_frame_time = now
             self._process_and_display(raw_image, depth_frame, cx, cy)
-        if self.media_kind == "video" and self.media_finished:
-            return
-        delay = max(1, int(1000 / self.media_source.fps)) if self.media_kind == "video" and self.media_source is not None and not self.media_source.paused else 15
+        delay = max(1, int(1000 / self.media_source.fps)) if self.media_kind == "video" and self.media_source is not None and not self.media_source.paused else 1
         self._frame_after_id = self.after(delay, self.update_frame)
 
     def _process_and_display(self, raw_image, depth_frame, cx, cy):
         self._raw_frame = raw_image.copy()
         result = self._infer(raw_image)
         self._last_result = result
-        native = self._transform_display_image(raw_image.copy())
-        self._draw_result(native, result, scale=1.0, depth_frame=depth_frame, cx=cx, cy=cy)
-        self._detection_frame = native.copy()
         display_image = self._transform_display_image(raw_image.copy())
         scale = self._display_scale_for(display_image, raw_image)
         if scale != 1.0:
-            display_image = cv2.resize(display_image, (max(1,int(display_image.shape[1]*scale)), max(1,int(display_image.shape[0]*scale))))
+            display_image = cv2.resize(display_image, (max(1, int(display_image.shape[1] * scale)), max(1, int(display_image.shape[0] * scale))), interpolation=cv2.INTER_AREA)
         self.display_scale = scale
         self._draw_result(display_image, result, scale=scale, depth_frame=depth_frame, cx=cx, cy=cy)
         self._display_frame = display_image.copy()
         self.media_view.set_image(display_image)
         if self.recorder.recording:
+            native = self._transform_display_image(raw_image.copy())
+            self._draw_result(native, result, scale=1.0, depth_frame=depth_frame, cx=cx, cy=cy)
+            self._detection_frame = native
             self.recorder.write_frame(self._detection_frame)
 
     def _infer(self, frame):
@@ -437,6 +565,8 @@ class MainApp(ctk.CTkFrame):
         error = self.detection_worker.get_latest_error()
         if error != self._last_detection_error:
             self._last_detection_error = error
+            if error:
+                self._show_notice(f"Tracking error: {error}", "error")
         return result or {}
 
     def _display_scale_for(self, image, raw_image):
@@ -454,7 +584,7 @@ class MainApp(ctk.CTkFrame):
             classes = result.get("classes", [])
             if classes and not boxes_only:
                 label = classes[0]["label"]
-                overlay.draw_left_text(image, [(f"Image Class: {label}", (0,255,0))], scale=scale)
+                overlay.draw_left_text(image, [(f"Image Class: {label}", (0,255,0))], scale=1.0)
         elif kind == "detection":
             for item in result.get("detections", []):
                 if tracking or self.vision_task == "detection":
@@ -486,9 +616,9 @@ class MainApp(ctk.CTkFrame):
                 except Exception:
                     pass
             if left:
-                overlay.draw_left_text(image, left, scale=scale)
+                overlay.draw_left_text(image, left, scale=1.0)
             if self.settings.get("fps_viewer_on"):
-                overlay.draw_fps(image, self.fps, scale=scale)
+                overlay.draw_fps(image, self.fps, scale=1.0)
 
     def _draw_box_transformed(self, image, item, scale):
         x1,y1,x2,y2=self._transform_box(*item["box"],self._raw_frame.shape[1],self._raw_frame.shape[0])
@@ -581,6 +711,7 @@ class MainApp(ctk.CTkFrame):
         elif self.view_mode=="depth":
             if self.camera_source is None or not getattr(self.camera_source,"has_depth",False):
                 self.view_mode="rgb"
+                self._show_notice("No depth camera detected. Showing RGB stream.", "error")
         return image
 
     def _transform_point(self,x,y,width,height):
@@ -606,33 +737,43 @@ class MainApp(ctk.CTkFrame):
 
     def flip_vertical(self):
         self.flip_vertical_enabled=not self.flip_vertical_enabled
+        self._show_notice(f"Vertical Flip: {'ON' if self.flip_vertical_enabled else 'OFF'}", "ok")
 
     def flip_horizontal(self):
         self.flip_horizontal_enabled=not self.flip_horizontal_enabled
+        self._show_notice(f"Horizontal Flip: {'ON' if self.flip_horizontal_enabled else 'OFF'}", "ok")
 
     def rotate_cw(self):
         self.rotation_angle=(self.rotation_angle+90)%360
+        self._show_notice(f"Rotation: {self.rotation_angle}°", "ok")
 
     def rotate_ccw(self):
         self.rotation_angle=(self.rotation_angle-90)%360
+        self._show_notice(f"Rotation: {self.rotation_angle}°", "ok")
 
     def show_rgb_channel(self):
         self.view_mode="rgb"
+        self._show_notice("RGB view enabled", "ok")
 
     def show_red_channel(self):
         self.view_mode="red"
+        self._show_notice("Red channel enabled", "ok")
 
     def show_green_channel(self):
         self.view_mode="green"
+        self._show_notice("Green channel enabled", "ok")
 
     def show_blue_channel(self):
         self.view_mode="blue"
+        self._show_notice("Blue channel enabled", "ok")
 
     def show_grayscale(self):
         self.view_mode="gray"
+        self._show_notice("Grayscale view enabled", "ok")
 
     def show_depth_channel(self):
         self.view_mode="depth"
+        self._show_notice("Depth view enabled", "ok")
 
     def _open_singleton_window(self,attr,builder):
         win=getattr(self,attr,None)
@@ -654,6 +795,7 @@ class MainApp(ctk.CTkFrame):
         return slider
 
     def open_threshold_settings(self):
+        self._show_notice("Thresholding settings opened", "idle")
         def build():
             picker=ctk.CTkToplevel(self); picker.title("Select Thresholding Method"); picker.geometry("340x260"); picker.resizable(False,False)
             ctk.CTkLabel(picker,text="Choose a Thresholding Technique",font=ctk.CTkFont(size=15,weight="bold")).pack(padx=16,pady=(20,12))
@@ -665,6 +807,7 @@ class MainApp(ctk.CTkFrame):
 
     def _open_binary_threshold_window(self):
         self.view_mode,self.threshold_method="threshold","binary"
+        self._show_notice("Binary thresholding enabled", "ok")
         def build():
             win=ctk.CTkToplevel(self); win.title("Thresholding - Binary"); win.geometry("380x260"); win.resizable(False,False)
             self._labeled_slider(win,"Threshold Value",0,255,self.binary_thresh,lambda v:setattr(self,"binary_thresh",int(v)),pady=(20,2))
@@ -674,6 +817,7 @@ class MainApp(ctk.CTkFrame):
 
     def _open_otsu_window(self):
         self.view_mode,self.threshold_method="threshold","otsu"
+        self._show_notice("Otsu thresholding enabled", "ok")
         def build():
             win=ctk.CTkToplevel(self); win.title("Thresholding - Otsu's Method"); win.geometry("380x240")
             ctk.CTkLabel(win,text="Otsu's method computes the split point automatically from the image histogram. Only the output level is configurable here.",font=ctk.CTkFont(size=12),text_color="gray60",justify="left",wraplength=340).pack(padx=20,pady=(18,4))
@@ -685,6 +829,7 @@ class MainApp(ctk.CTkFrame):
 
     def _open_adaptive_window(self):
         self.view_mode,self.threshold_method="threshold","adaptive"
+        self._show_notice("Adaptive thresholding enabled", "ok")
         def build():
             win=ctk.CTkToplevel(self); win.title("Thresholding - Adaptive"); win.geometry("400x400"); win.resizable(False,False)
             ctk.CTkLabel(win,text="Local Method",anchor="w").pack(fill="x",padx=20,pady=(18,2))
@@ -702,6 +847,7 @@ class MainApp(ctk.CTkFrame):
 
     def open_hsv_settings(self):
         self.view_mode="hsv"
+        self._show_notice("HSV filter enabled", "ok")
         def build():
             win=ctk.CTkToplevel(self); win.title("HSV Filter"); win.geometry("420x560"); win.resizable(False,False)
             sliders=[("Hue Minimum",0,179,self.hsv_h_min,lambda v:setattr(self,"hsv_h_min",int(v))),("Hue Maximum",0,179,self.hsv_h_max,lambda v:setattr(self,"hsv_h_max",int(v))),("Saturation Minimum",0,255,self.hsv_s_min,lambda v:setattr(self,"hsv_s_min",int(v))),("Saturation Maximum",0,255,self.hsv_s_max,lambda v:setattr(self,"hsv_s_max",int(v))),("Value Minimum",0,255,self.hsv_v_min,lambda v:setattr(self,"hsv_v_min",int(v))),("Value Maximum",0,255,self.hsv_v_max,lambda v:setattr(self,"hsv_v_max",int(v)))]
@@ -711,6 +857,7 @@ class MainApp(ctk.CTkFrame):
 
     def open_hsl_settings(self):
         self.view_mode="hsl"
+        self._show_notice("HSL filter enabled", "ok")
         def build():
             win=ctk.CTkToplevel(self); win.title("HSL Filter"); win.geometry("420x560"); win.resizable(False,False)
             sliders=[("Hue Minimum",0,179,self.hsl_h_min,lambda v:setattr(self,"hsl_h_min",int(v))),("Hue Maximum",0,179,self.hsl_h_max,lambda v:setattr(self,"hsl_h_max",int(v))),("Lightness Minimum",0,255,self.hsl_l_min,lambda v:setattr(self,"hsl_l_min",int(v))),("Lightness Maximum",0,255,self.hsl_l_max,lambda v:setattr(self,"hsl_l_max",int(v))),("Saturation Minimum",0,255,self.hsl_s_min,lambda v:setattr(self,"hsl_s_min",int(v))),("Saturation Maximum",0,255,self.hsl_s_max,lambda v:setattr(self,"hsl_s_max",int(v)))]
@@ -726,6 +873,5 @@ class MainApp(ctk.CTkFrame):
             self.config_window.destroy()
         self.recorder.stop_recording()
         self._stop_current_source()
-        if self.detection_worker:
-            self.detection_worker.stop()
+        self._unload_model()
 
