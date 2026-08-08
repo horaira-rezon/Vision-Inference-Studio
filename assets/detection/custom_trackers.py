@@ -103,8 +103,9 @@ def _build_deepsort(device):
             tracker = DeepOcSort(reid_weights=target, device=device, half=False)
             if getattr(tracker, "reid_model", None) is not None:
                 return tracker
-        except Exception:
-            pass  # wrong/corrupt file - fall through to motion-only below
+            print(f"[custom_trackers] downloaded {target} but DeepOcSort still reports reid_model=None after loading it")
+        except Exception as e:
+            print(f"[custom_trackers] downloaded {target} but DeepOcSort raised loading it: {type(e).__name__}: {e}")
 
     print(
         "[custom_trackers] DeepSORT's ReID weights (osnet_x0_25_msmt17.pt) "
@@ -154,6 +155,8 @@ def _try_download_reid_weights(target_path):
             target_path.parent.mkdir(parents=True, exist_ok=True)
             urllib.request.urlretrieve(url, target_path)
             if not target_path.exists() or target_path.stat().st_size < 1_000_000:
+                size = target_path.stat().st_size if target_path.exists() else 0
+                print(f"[custom_trackers] download from {url} produced only {size} bytes (expected >1MB) - discarding")
                 target_path.unlink(missing_ok=True)
                 continue
             if expected_sha256:
@@ -162,8 +165,10 @@ def _try_download_reid_weights(target_path):
                     print(f"[custom_trackers] downloaded {url} but its SHA256 didn't match the known-good hash (got {actual}) - discarding")
                     target_path.unlink(missing_ok=True)
                     continue
+            print(f"[custom_trackers] downloaded and verified {url} -> {target_path}")
             return True
-        except Exception:
+        except Exception as e:
+            print(f"[custom_trackers] download attempt failed for {url}: {type(e).__name__}: {e}")
             target_path.unlink(missing_ok=True)
             continue
     return False
