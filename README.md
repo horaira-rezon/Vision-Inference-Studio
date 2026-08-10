@@ -101,7 +101,7 @@ Vision Inference Studio
 
 ## ⚙️ Installation and Local Setup
 
-**Prerequisits:** Python 3.10+, Git, a compatible camera (USB webcam or Intel RealSense), and sufficient CPU/GPU resources for the selected AI models, and the model weights corresponding to the selected architecture and vision task.
+**Prerequisits:** Python 3.10+, Git, a compatible camera, and sufficient CPU/GPU resources for the selected AI models, and the model weights corresponding to the selected architecture and vision task.
 
 **1. Clone the repository:**
 
