@@ -7,6 +7,8 @@ DEFAULT_SETTINGS = {
     "tracker_mode": "none",
     "confidence_threshold": 50,
     "fps_viewer_on": True,
+    "axis_lines_on": False,
+    "axis_line_slider": 0.5,
 }
 
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "..", "assets", "settings.json")

@@ -20,6 +20,8 @@ TRACKER_OPTIONS = [
 DEFAULTS = {
     "tracker_mode": "none",
     "confidence_threshold": 50,
+    "axis_lines_on": False,
+    "axis_line_slider": 0.5,
     "fps_viewer_on": True,
 }
 
@@ -109,7 +111,25 @@ class ConfigWindow(ctk.CTkToplevel):
         desc.pack(anchor="w",pady=(8,0),fill="x")
         self._register_wrap_label(desc)
 
-        self._section_title(scroll, "FPS Viewer")
+        self._section_title(scroll, "3. X-Y Axis Lines")
+        axis_card=ctk.CTkFrame(scroll,fg_color=CARD_BG,corner_radius=10,border_width=1,border_color=BORDER)
+        axis_card.pack(fill="x",pady=(2,4))
+        axis_inner=ctk.CTkFrame(axis_card,fg_color="transparent")
+        axis_inner.pack(fill="x",padx=16,pady=12)
+        self.axis_switch_var=tk.BooleanVar(value=False)
+        self.axis_switch=ctk.CTkSwitch(axis_inner,text="Show X-Y axis lines",variable=self.axis_switch_var,onvalue=True,offvalue=False,command=self._on_axis_toggle,progress_color=ACCENT)
+        self.axis_switch.pack(anchor="w")
+        ctk.CTkLabel(axis_inner,text="X Axis Position",font=ctk.CTkFont(size=13),text_color="gray70").pack(anchor="w",pady=(10,0))
+        self.axis_slider_var=tk.DoubleVar(value=0.5)
+        self.axis_slider=ctk.CTkSlider(axis_inner,from_=0.0,to=1.0,variable=self.axis_slider_var,command=self._on_axis_slide,progress_color=ACCENT)
+        self.axis_slider.pack(fill="x",pady=(6,0))
+        self._prevent_slider_wheel_hijack(self.axis_slider)
+        self._flush_on_release(self.axis_slider)
+        desc=ctk.CTkLabel(axis_inner,text="Draws a horizontal and vertical line crossing at the streaming window's true center, unaffected by mirror/rotate. The slider moves the horizontal (X) line up or down.",font=ctk.CTkFont(size=13),text_color=DESC_COLOR,justify="left",anchor="w")
+        desc.pack(anchor="w",pady=(8,0),fill="x")
+        self._register_wrap_label(desc)
+
+        self._section_title(scroll, "4. FPS Viewer")
         fps_card=ctk.CTkFrame(scroll,fg_color=CARD_BG,corner_radius=10,border_width=1,border_color=BORDER)
         fps_card.pack(fill="x",pady=(2,4))
         fps_inner=ctk.CTkFrame(fps_card,fg_color="transparent")
@@ -190,6 +210,13 @@ class ConfigWindow(ctk.CTkToplevel):
         self.settings.set("confidence_threshold",pct,persist=False)
         self.confidence_value_label.configure(text=f"{pct}%")
 
+    def _on_axis_toggle(self):
+        self.settings.set("axis_lines_on",bool(self.axis_switch_var.get()))
+        self.axis_slider.configure(state="normal" if self.axis_switch_var.get() else "disabled")
+
+    def _on_axis_slide(self,value):
+        self.settings.set("axis_line_slider",float(value),persist=False)
+
     def _on_fps_toggle(self):
         self.settings.set("fps_viewer_on",bool(self.fps_switch_var.get()))
 
@@ -218,4 +245,9 @@ class ConfigWindow(ctk.CTkToplevel):
         self.confidence_slider_var.set(confidence)
         self.confidence_value_label.configure(text=f"{confidence}%")
         self.fps_switch_var.set(bool(self.settings.get("fps_viewer_on")))
+        axis_on=bool(self.settings.get("axis_lines_on"))
+        self.axis_switch_var.set(axis_on)
+        axis_val=self.settings.get("axis_line_slider")
+        self.axis_slider_var.set(axis_val if axis_val is not None else 0.5)
+        self.axis_slider.configure(state="normal" if axis_on else "disabled")
         self._refresh_tracker_buttons()

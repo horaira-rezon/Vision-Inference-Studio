@@ -609,6 +609,22 @@ class MainApp(ctk.CTkFrame):
             return 1.0
         return max(min(panel_w / w, panel_h / h) * self.media_view.size_shrink, 0.01)
 
+    def _compute_axis_row(self, cy_disp, h_disp):
+        """Row (in already-transformed+scaled DISPLAY coordinates) the
+        horizontal axis line is drawn on. slider=0.5 keeps it exactly at
+        cy_disp (true center); >0.5 moves it up toward row 0, <0.5 moves
+        it down toward the bottom edge. The vertical line's column is
+        never touched by this - see _draw_result."""
+        slider = self.settings.get("axis_line_slider")
+        if slider is None:
+            slider = 0.5
+        t = (slider - 0.5) * 2
+        if t >= 0:
+            row = cy_disp - t * cy_disp
+        else:
+            row = cy_disp + (-t) * (h_disp - 1 - cy_disp)
+        return int(round(row))
+
     def _draw_result(self, image, result, scale=1.0, depth_frame=None, cx=None, cy=None, boxes_only=False):
         kind = result.get("type")
         tracking = self._current_tracker() != "none"
@@ -645,6 +661,12 @@ class MainApp(ctk.CTkFrame):
                     copy["box"] = bbox
                     self._draw_box_cosmetic(image, copy, scale, draw_label=True)
         if not boxes_only:
+            if self.settings.get("axis_lines_on") and cx is not None and cy is not None and self._raw_frame is not None:
+                raw_h, raw_w = self._raw_frame.shape[:2]
+                disp_cx, disp_cy = self._transform_point(cx, cy, raw_w, raw_h)
+                s_cx, s_cy = int(disp_cx * scale), int(disp_cy * scale)
+                axis_row = self._compute_axis_row(s_cy, image.shape[0])
+                overlay.draw_axes(image, s_cx, axis_row, thickness=max(1, round(scale)))
             left=[]
             if self.camera_source is not None and getattr(self.camera_source, "has_depth", False) and depth_frame is not None and cx is not None and cy is not None:
                 try:

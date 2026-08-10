@@ -30,6 +30,11 @@ def _color_for(key):
 def _text_scale(scale):
     return min(scale, 1.3)
 
+def draw_axes(image, cx, axis_y, thickness=1, color=(100, 100, 100)):
+    h, w = image.shape[:2]
+    cv2.line(image, (0, axis_y), (w, axis_y), color, thickness)
+    cv2.line(image, (cx, 0), (cx, h), color, thickness)
+
 def draw_fps(image, fps, scale=1.0):
     text = f"FPS: {fps:.1f}"
     ts = _text_scale(scale)
