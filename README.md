@@ -84,7 +84,7 @@ Vision Inference Studio
 
 2. **Pick an input:** From the left sidebar's "1. Inference Input" section → **Select Input**. Choose a live camera (it's auto-detected if only one camera is available), a video file, or an image file.
 
-3. **Pick a vision task:** From "2. Vision Tasks", choose Classification, Detection, Instance Segmentation, Semantic Segmentation, or Pose Estimation. You'll then be asked to pick an architecture to run for that task.
+3. **Pick a vision task:** From "2. Vision Tasks", choose Classification, Detection, Instance Segmentation, Semantic Segmentation, or Pose Estimation. You'll then be asked to pick an architecture.
 
 4. **Load a model weight:** Click "Model Weight (.pt)" and point it at your trained weights file. Note: Pick an architecture based on which your model was trained otherwise, you'll get an error.
 
@@ -95,7 +95,7 @@ Vision Inference Studio
    - Slide the X-Line slider to nudge the horizontal line up and down,
    - toggle the FPS Viewer** on or off as an on-screen readout.
 
-6. **Open View Controls** on the right sidebar to flip or rotate the stream, or switch the display to a single color channel, grayscale, different thresholding methods, HSV/HSL mask, or depth view (if a depth camera is active).
+6. **Open View Controls** on the right sidebar to flip or rotate the stream, or switch the display to a single color channel, grayscale, different thresholding methods, HSV/HSL mask, or depth view (depth camera).
 
 7. **Record or Screenshot:** From "3. Recording" / "4. Screenshot" in the left sidebar — pick an output folder once, then use Start Recording / Window Screenshot / Capture Cam. Frame / Detection UI Only as needed.
 
