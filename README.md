@@ -140,17 +140,13 @@ That's it. The app creates its own local `assets/assets/settings.json` on first 
 
 ## ⭐ Citation
 
-If you use this project in your academic research or other work, please cite the repository:
-
-```
-Vision Inference Studio (2026). A Desktop Computer Vision Inference Application for Detection, Segmentation, Classification, Pose Estimation,  and Object Tracking. Version 1.0.0.
-```
+If you use this project in your academic research or other works, please cite this repository. And, if this software helps you with your project, dropping a star on the repo is always appreciated!
 
 ---
 
 ## 📄 License
 
-This project is distributed under the MIT License and is fully open for reference and learning purposes. See LICENSE file for details. Dropping a star on the repo is always appreciated!
+This project is distributed under the MIT License and is fully open for reference and learning purposes. See LICENSE file for details. You are free to clone it and adapt the structural code for your own project.
 
 ---
 
