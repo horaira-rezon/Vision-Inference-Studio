@@ -53,7 +53,7 @@ class YOLOModel(VisionModel):
             xyxy = [int(v) for v in box.xyxy[0]]
             cls_id = int(box.cls[0])
             track_id = int(box.id[0]) if getattr(box, "id", None) is not None else None
-            detections.append({"box": tuple(xyxy), "conf": conf, "label": self.names[cls_id], "track_id": track_id})
+            detections.append({"box": tuple(xyxy), "conf": conf, "label": self.names[cls_id], "class_id": cls_id, "track_id": track_id})
         return {"type": "detection", "detections": detections}
 
     def _segmentation_results(self, results, threshold, tracker):
@@ -73,7 +73,7 @@ class YOLOModel(VisionModel):
             mask = None
             if masks is not None and i < len(masks.data):
                 mask = masks.data[i].detach().cpu().numpy()
-            items.append({"box": (x1,y1,x2,y2), "conf": conf, "label": self.names[cls_id], "track_id": track_id, "mask": mask})
+            items.append({"box": (x1,y1,x2,y2), "conf": conf, "label": self.names[cls_id], "class_id": cls_id, "track_id": track_id, "mask": mask})
         return {"type": "instance_segmentation", "segments": items}
 
     def _pose_results(self, results, threshold, tracker):
@@ -93,7 +93,7 @@ class YOLOModel(VisionModel):
             points = None
             if keypoints is not None and i < len(keypoints.xy):
                 points = keypoints.xy[i].detach().cpu().numpy().tolist()
-            items.append({"box": (x1,y1,x2,y2), "conf": conf, "label": self.names[cls_id], "track_id": track_id, "keypoints": points})
+            items.append({"box": (x1,y1,x2,y2), "conf": conf, "label": self.names[cls_id], "class_id": cls_id, "track_id": track_id, "keypoints": points})
         return {"type": "pose", "poses": items}
 
     def _name_to_id(self, name):

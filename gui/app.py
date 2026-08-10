@@ -127,12 +127,27 @@ class MainApp(ctk.CTkFrame):
             self.notice_bar.configure(wraplength=max(200, width - self.NOTICE_MARGIN * 2))
 
     def _show_notice(self, text, color_key="ok"):
+        self._notice_token = getattr(self, "_notice_token", 0) + 1
+        token = self._notice_token
         self.notice_bar.configure(
             text=text,
             text_color=NOTICE_COLORS.get(color_key, NOTICE_COLORS["idle"]),
         )
         self.notice_bar.lift()
-        self.after(4000, lambda: self.notice_bar.configure(text=""))
+        self._notice_priority_until = time.perf_counter() + 4.0
+        def _clear():
+            if self._notice_token == token:
+                self.notice_bar.configure(text="")
+        self.after(4000, _clear)
+
+    def _update_classification_notice(self, text):
+        # Low-priority, continuously-refreshed readout - never steals the
+        # notice bar away from an explicit _show_notice still in its
+        # display window (camera/recording/error messages, etc).
+        if time.perf_counter() < getattr(self, "_notice_priority_until", 0):
+            return
+        self.notice_bar.configure(text=text, text_color=NOTICE_COLORS["idle"])
+        self.notice_bar.lift()
 
     def select_camera(self):
         picker = ChoiceWindow(
@@ -601,7 +616,7 @@ class MainApp(ctk.CTkFrame):
             classes = result.get("classes", [])
             if classes and not boxes_only:
                 label = classes[0]["label"]
-                overlay.draw_left_text(image, [(f"Image Class: {label}", (0,255,0))], scale=1.0)
+                self._update_classification_notice(f"Class: {label}")
         elif kind == "detection":
             for item in result.get("detections", []):
                 if tracking or self.vision_task == "detection":
@@ -609,10 +624,14 @@ class MainApp(ctk.CTkFrame):
         elif kind == "instance_segmentation":
             segments = result.get("segments", [])
             transformed = self._transform_segments(segments)
-            overlay.draw_instance_masks(image, transformed)
+            computed = overlay.draw_instance_masks(image, transformed, scale=scale)
             if tracking:
-                for item in transformed:
-                    self._draw_box_direct(image, item, scale)
+                for item in computed:
+                    # box/color already come from the mask's own pixel extent
+                    # (leftmost/rightmost/topmost/bottommost) in final image
+                    # coordinates - draw the box only, the label is already
+                    # shown by draw_instance_masks in the segment's own color.
+                    self._draw_box_cosmetic(image, item, scale, draw_label=False)
         elif kind == "semantic_segmentation":
             mask = result.get("mask")
             mask = self._transform_mask(mask) if mask is not None else None
@@ -620,9 +639,11 @@ class MainApp(ctk.CTkFrame):
         elif kind == "pose":
             poses = self._transform_poses(result.get("poses", []))
             for item in poses:
-                overlay.draw_pose(image, item.get("keypoints"), scale)
-                if tracking:
-                    self._draw_box_direct(image, item, scale)
+                bbox = overlay.draw_pose(image, item.get("keypoints"), scale)
+                if tracking and bbox is not None:
+                    copy = dict(item)
+                    copy["box"] = bbox
+                    self._draw_box_cosmetic(image, copy, scale, draw_label=True)
         if not boxes_only:
             left=[]
             if self.camera_source is not None and getattr(self.camera_source, "has_depth", False) and depth_frame is not None and cx is not None and cy is not None:
@@ -648,6 +669,16 @@ class MainApp(ctk.CTkFrame):
         if scale != 1.0:
             box=tuple(int(v*scale) for v in box)
         overlay.draw_detection_box(image,box,item.get("label","object"),item.get("conf",0.0),scale=scale,track_id=item.get("track_id"))
+
+    def _draw_box_cosmetic(self, image, item, cosmetic_scale, draw_label=True):
+        # Box coordinates are already in final display-image pixel space
+        # (derived from a mask's or pose's own pixel extent) - only the
+        # stroke/font sizing should follow the display scale, not the box.
+        overlay.draw_detection_box(
+            image, item["box"], item.get("label", "object"), item.get("conf", 0.0),
+            scale=cosmetic_scale, track_id=item.get("track_id"),
+            color=item.get("color"), draw_label=draw_label,
+        )
 
     def _transform_segments(self,segments):
         out=[]
