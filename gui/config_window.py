@@ -119,10 +119,28 @@ class ConfigWindow(ctk.CTkToplevel):
         self.axis_switch_var=tk.BooleanVar(value=False)
         self.axis_switch=ctk.CTkSwitch(axis_inner,text="Show X-Y axis lines",variable=self.axis_switch_var,onvalue=True,offvalue=False,command=self._on_axis_toggle,progress_color=ACCENT)
         self.axis_switch.pack(anchor="w")
-        ctk.CTkLabel(axis_inner,text="X Axis Position",font=ctk.CTkFont(size=13),text_color="gray70").pack(anchor="w",pady=(10,0))
-        self.axis_slider_var=tk.DoubleVar(value=0.5)
-        self.axis_slider=ctk.CTkSlider(axis_inner,from_=0.0,to=1.0,variable=self.axis_slider_var,command=self._on_axis_slide,progress_color=ACCENT)
-        self.axis_slider.pack(fill="x",pady=(6,0))
+        # X axis position controls with reset button
+        axis_pos_frame = ctk.CTkFrame(axis_inner, fg_color="transparent")
+        axis_pos_frame.pack(fill="x", pady=(10,0))
+        axis_pos_frame.columnconfigure(0, weight=0)  # Label
+        axis_pos_frame.columnconfigure(1, weight=0)  # Reset button
+        axis_pos_frame.columnconfigure(2, weight=1)  # Slider (expands)
+
+        ctk.CTkLabel(axis_pos_frame, text="X Axis Position", font=ctk.CTkFont(size=13), text_color="gray70").grid(row=0, column=0, padx=(0,5), pady=0, sticky="w")
+
+        self.axis_reset_btn = ctk.CTkButton(axis_pos_frame, text="Reset", width=50, height=24,
+                                          font=ctk.CTkFont(size=10),
+                                          command=self._on_axis_reset,
+                                          fg_color="transparent", hover_color=CARD_BG_HOVER,
+                                          border_width=1, border_color="gray40")
+        self.axis_reset_btn.grid(row=0, column=1, padx=(0,5), pady=0)
+
+        self.axis_slider_var = tk.DoubleVar(value=0.5)
+        self.axis_slider = ctk.CTkSlider(axis_pos_frame, from_=0.0, to=1.0,
+                                       variable=self.axis_slider_var, command=self._on_axis_slide,
+                                       progress_color=ACCENT)
+        self.axis_slider.grid(row=0, column=2, padx=(0,0), pady=0, sticky="ew")
+
         self._prevent_slider_wheel_hijack(self.axis_slider)
         self._flush_on_release(self.axis_slider)
         desc=ctk.CTkLabel(axis_inner,text="Draws a horizontal and vertical line crossing at the streaming window's true center, unaffected by mirror/rotate. The slider moves the horizontal (X) line up or down.",font=ctk.CTkFont(size=13),text_color=DESC_COLOR,justify="left",anchor="w")
@@ -216,6 +234,10 @@ class ConfigWindow(ctk.CTkToplevel):
 
     def _on_axis_slide(self,value):
         self.settings.set("axis_line_slider",float(value),persist=False)
+
+    def _on_axis_reset(self):
+        self.axis_slider_var.set(0.5)
+        self.settings.set("axis_line_slider", 0.5, persist=False)
 
     def _on_fps_toggle(self):
         self.settings.set("fps_viewer_on",bool(self.fps_switch_var.get()))
