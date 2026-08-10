@@ -1,0 +1,10 @@
+cff-version: 1.0.0
+message: "If you use this software in academic research, please cite it as below."
+title: "Vision Inference Studio"
+version: 1.0.0
+authors:
+  - family-names: "Rezon"
+    given-names: "Horaira"
+date-released: 2026-08-10
+url: "https://github.com/horaira-rezon/Vision-Inference-Studio"
+type: software
