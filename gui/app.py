@@ -438,11 +438,15 @@ class MainApp(ctk.CTkFrame):
         self._raise_coco_window()
 
     def _raise_coco_window(self):
-        """Reopens the class picker in its normal (non-pending) mode -
-        COCO is already running at this point, so every toggle here
-        live-updates the filter immediately via on_change, same as
-        before this change."""
+        """Brings the class picker to front. Usually this is the SAME
+        window that was already open in pending mode before Start
+        Detection was clicked (set_live_mode() already switched it to
+        live mode in-place - see CocoClassesWindow) - in that case this
+        just lifts/focuses it. A fresh window is only actually built if
+        none is currently open at all (e.g. it was closed earlier and
+        "COCO Classes" is being reopened while COCO is already active)."""
         if self.coco_classes_window is not None and self.coco_classes_window.winfo_exists():
+            self.coco_classes_window.set_live_mode()
             self.coco_classes_window.lift()
             self.coco_classes_window.focus_force()
             return

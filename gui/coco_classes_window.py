@@ -8,20 +8,23 @@ CARD_BG = "#151c26"
 ACCENT = "#2563eb"
 DESC_COLOR = "gray60"
 
+DESC_LIVE = "Check whichever classes you want detected. Leave nothing checked to show all 80."
+DESC_PENDING = "Check whichever classes you want detected, or use Select All / Clear All. Nothing checked means all 80. Click Start Detection when ready."
+
 
 class CocoClassesWindow(ctk.CTkToplevel):
     def __init__(self, master, settings, on_change, pending=False, on_start=None):
         super().__init__(master)
         self.settings = settings
         self.on_change = on_change
-        # pending=True: no model is loaded yet - this window is being
-        # shown BEFORE detection starts, so you can pick/select-all/
-        # clear-all classes first. An explicit "Start Detection" button
-        # (calling on_start) is what actually kicks off the model load,
-        # instead of detection already running the moment this window
-        # opens. pending=False (the normal case, once COCO is already
-        # the active model) behaves exactly as before: every toggle
-        # live-updates the filter via on_change immediately.
+        # pending=True: no model is loaded yet - this window is shown
+        # BEFORE detection starts, so you can pick/select-all/clear-all
+        # classes first. Clicking "Start Detection" calls on_start() and
+        # switches THIS SAME window into live mode (_set_live_mode) -
+        # it is never destroyed and rebuilt. Rebuilding a second window
+        # right after the first is what caused the double-flicker /
+        # "window reappears" bug and the description text appearing to
+        # show up twice in a row.
         self.pending = pending
         self.on_start = on_start
         self.title("COCO Classes")
@@ -29,15 +32,17 @@ class CocoClassesWindow(ctk.CTkToplevel):
         self.minsize(360, 420)
         self.configure(fg_color=BG)
 
-        self._vars = {}       # class_id -> BooleanVar
-        self._rows = {}       # class_id -> row frame (for search filtering)
+        self._vars = {}     # class_id -> BooleanVar
+        self._checks = {}   # class_id -> CTkCheckBox (for search filtering)
 
         self._build_ui()
         self._restore_from_settings()
 
         self.bind("<Escape>", lambda e: self._close())
+        self.bind("<Configure>", self._update_wraplength)
         self.protocol("WM_DELETE_WINDOW", self._close)
         self.after(50, self._focus_and_grab)
+        self.after(60, self._update_wraplength)  # sane wrap width before first paint settles
 
     def _focus_and_grab(self):
         self.lift()
@@ -59,12 +64,12 @@ class CocoClassesWindow(ctk.CTkToplevel):
         header.pack(fill="x", padx=24, pady=(20, 4))
         ctk.CTkLabel(header, text="COCO Classes", font=ctk.CTkFont(size=26, weight="bold")).pack(side="left")
 
-        desc = ctk.CTkLabel(
+        self.desc = ctk.CTkLabel(
             self,
-            text="Check whichever classes you want detected. Leave nothing checked to show all 80.",
-            font=ctk.CTkFont(size=13), text_color=DESC_COLOR, justify="left", anchor="w", wraplength=370,
+            text=DESC_PENDING if self.pending else DESC_LIVE,
+            font=ctk.CTkFont(size=13), text_color=DESC_COLOR, justify="left", anchor="w",
         )
-        desc.pack(fill="x", padx=24, pady=(0, 10))
+        self.desc.pack(fill="x", padx=24, pady=(0, 10))
 
         self.search_var = tk.StringVar(value="")
         search_entry = ctk.CTkEntry(self, placeholder_text="Search classes...", textvariable=self.search_var)
@@ -86,36 +91,45 @@ class CocoClassesWindow(ctk.CTkToplevel):
         inner = ctk.CTkFrame(card, fg_color="transparent")
         inner.pack(fill="both", expand=True, padx=12, pady=10)
 
+        # No per-row wrapper Frame - a wrapper per checkbox doubled the
+        # widget count (160 widgets instead of 80) for no benefit, since
+        # CTkCheckBox itself can be pack_forget()/pack()'d directly for
+        # search filtering. Fewer widgets = a noticeably less janky
+        # build, since every widget added mid-pack forces a geometry
+        # recompute of everything already placed.
         for class_id, name in enumerate(COCO_CLASSES):
-            row = ctk.CTkFrame(inner, fg_color="transparent")
-            row.pack(fill="x", anchor="w")
             var = tk.BooleanVar(value=False)
-            cb = ctk.CTkCheckBox(row, text=name, variable=var, command=self._on_toggle, fg_color=ACCENT, hover_color="#1d4ed8")
-            cb.pack(anchor="w", pady=2)
+            cb = ctk.CTkCheckBox(inner, text=name, variable=var, command=self._on_toggle, fg_color=ACCENT, hover_color="#1d4ed8")
+            cb.pack(anchor="w", pady=2, fill="x")
             self._vars[class_id] = var
-            self._rows[class_id] = row
+            self._checks[class_id] = cb
 
         self.status_label = ctk.CTkLabel(self, text="0 of 80 selected", font=ctk.CTkFont(size=13), text_color=DESC_COLOR)
         self.status_label.pack(padx=24, pady=(0, 8), anchor="w")
 
+        self.start_btn = ctk.CTkButton(
+            self, text="Start Detection", command=self._start_detection,
+            fg_color=ACCENT, hover_color="#1d4ed8", font=ctk.CTkFont(size=14, weight="bold"),
+        )
         if self.pending:
-            desc.configure(text="Check whichever classes you want detected, or use Select All / Clear All. Nothing checked means all 80.")
-            start_btn = ctk.CTkButton(
-                self, text="Start Detection", command=self._start_detection,
-                fg_color=ACCENT, hover_color="#1d4ed8", font=ctk.CTkFont(size=14, weight="bold"),
-            )
-            start_btn.pack(fill="x", padx=24, pady=(0, 20))
+            self.start_btn.pack(fill="x", padx=24, pady=(0, 20))
+
+    def _update_wraplength(self, event=None):
+        width = self.winfo_width()
+        if width <= 1:
+            width = 420  # window not realized yet - fall back to initial geometry
+        self.desc.configure(wraplength=max(200, width - 48))
 
     def _apply_search(self):
         query = self.search_var.get().strip().lower()
         for class_id, name in enumerate(COCO_CLASSES):
-            row = self._rows[class_id]
+            cb = self._checks[class_id]
             if query in name.lower():
-                if not row.winfo_ismapped():
-                    row.pack(fill="x", anchor="w")
+                if not cb.winfo_ismapped():
+                    cb.pack(anchor="w", pady=2, fill="x")
             else:
-                if row.winfo_ismapped():
-                    row.pack_forget()
+                if cb.winfo_ismapped():
+                    cb.pack_forget()
 
     def _selected_ids(self):
         return [class_id for class_id, var in self._vars.items() if var.get()]
@@ -136,9 +150,20 @@ class CocoClassesWindow(ctk.CTkToplevel):
         self._on_toggle()
 
     def _start_detection(self):
+        self.set_live_mode()
         if self.on_start:
             self.on_start()
-        self._close()
+
+    def set_live_mode(self):
+        """Switches this SAME window from pending -> live in place - no
+        destroy/rebuild. Called the moment Start Detection is clicked
+        (the filter is already fully usable pre-load; on_change safely
+        no-ops until a detection_worker exists) and is a safe no-op if
+        called again later (e.g. app.py's post-load callback)."""
+        self.pending = False
+        self.on_start = None
+        self.desc.configure(text=DESC_LIVE)
+        self.start_btn.pack_forget()
 
     def _restore_from_settings(self):
         saved = self.settings.get("coco_class_filter") or []
