@@ -105,8 +105,15 @@ Vision Inference Studio
 
 **1. Clone the repository:**
 
+Using HTTPS:
 ```bash
-git clone <your-repository-url>
+git clone https://github.com/horaira-rezon/Vision-Inference-Studio.git
+cd <repository-folder>
+```
+
+Using SSH:
+```bash
+git clone git@github.com:horaira-rezon/Vision-Inference-Studio.git
 cd <repository-folder>
 ```
 
