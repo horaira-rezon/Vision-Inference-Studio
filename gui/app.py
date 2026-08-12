@@ -435,16 +435,18 @@ class MainApp(ctk.CTkFrame):
         self._on_model_loaded(model, "detection", "yolo", COCO_MODEL_NAME)
         if self.detection_worker:
             self.detection_worker.set_class_filter(self.settings.get("coco_class_filter") or [])
-        self._raise_coco_window()
+        # No _raise_coco_window() here - you already confirmed your
+        # class selection by clicking Start Detection, so there's
+        # nothing left to show. The window closes itself the moment
+        # Start Detection is clicked (see CocoClassesWindow._start_
+        # detection) and detection just appears on the video feed.
+        # _raise_coco_window() is only ever called from open_coco_
+        # classes()'s "COCO is already active, reopen to edit" branch.
 
     def _raise_coco_window(self):
-        """Brings the class picker to front. Usually this is the SAME
-        window that was already open in pending mode before Start
-        Detection was clicked (set_live_mode() already switched it to
-        live mode in-place - see CocoClassesWindow) - in that case this
-        just lifts/focuses it. A fresh window is only actually built if
-        none is currently open at all (e.g. it was closed earlier and
-        "COCO Classes" is being reopened while COCO is already active)."""
+        """Reopens the class picker in live mode - only reached when
+        COCO is already the active model and "COCO Classes" is clicked
+        again to edit the filter on the fly."""
         if self.coco_classes_window is not None and self.coco_classes_window.winfo_exists():
             self.coco_classes_window.set_live_mode()
             self.coco_classes_window.lift()

@@ -20,11 +20,10 @@ class CocoClassesWindow(ctk.CTkToplevel):
         # pending=True: no model is loaded yet - this window is shown
         # BEFORE detection starts, so you can pick/select-all/clear-all
         # classes first. Clicking "Start Detection" calls on_start() and
-        # switches THIS SAME window into live mode (_set_live_mode) -
-        # it is never destroyed and rebuilt. Rebuilding a second window
-        # right after the first is what caused the double-flicker /
-        # "window reappears" bug and the description text appearing to
-        # show up twice in a row.
+        # closes this window immediately - your selection is already
+        # saved via on_change as you toggled things, so there's nothing
+        # left to show once detection kicks off; it just appears on the
+        # video feed.
         self.pending = pending
         self.on_start = on_start
         self.title("COCO Classes")
@@ -150,9 +149,9 @@ class CocoClassesWindow(ctk.CTkToplevel):
         self._on_toggle()
 
     def _start_detection(self):
-        self.set_live_mode()
         if self.on_start:
             self.on_start()
+        self._close()
 
     def set_live_mode(self):
         """Switches this SAME window from pending -> live in place - no
