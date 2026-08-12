@@ -1,9 +1,9 @@
 {
   "video_output_dir": "/home/allsabaab/Videos/Camera",
   "screenshot_output_dir": "/home/allsabaab/Pictures/Camera",
-  "tracker_mode": "bytetrack",
+  "tracker_mode": "none",
   "confidence_threshold": 50,
   "fps_viewer_on": true,
-  "axis_lines_on": false,
-  "axis_line_slider": 0.5
+  "axis_lines_on": true,
+  "axis_line_slider": 0.46900269541778977
 }

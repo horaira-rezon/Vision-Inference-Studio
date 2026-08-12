@@ -26,6 +26,8 @@ class LeftSidebar:
         self.model_btn.pack(fill="x", padx=16, pady=(4,2))
         self.model_weight_btn = ctk.CTkButton(self.sidebar, text="Model Weight (.pt)", command=app.select_model_weight, font=ctk.CTkFont(size=14), state="disabled")
         self.model_weight_btn.pack(fill="x", padx=16, pady=(0,2))
+        self.coco_classes_btn = ctk.CTkButton(self.sidebar, text="COCO Classes", command=app.open_coco_classes, font=ctk.CTkFont(size=14), state="disabled", fg_color="#1e3a5f", hover_color="#1e40af")
+        self.coco_classes_btn.pack(fill="x", padx=16, pady=(0,2))
         self.unload_tasks_btn = ctk.CTkButton(self.sidebar, text="Unload Tasks", command=app.unload_all_tasks, font=ctk.CTkFont(size=14), state="disabled", fg_color="#7f1d1d", hover_color="#991b1b")
         self.unload_tasks_btn.pack(fill="x", padx=16, pady=(0,2))
         self._section_label("3. Recording")

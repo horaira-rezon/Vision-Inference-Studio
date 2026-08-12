@@ -9,6 +9,7 @@ DEFAULT_SETTINGS = {
     "fps_viewer_on": True,
     "axis_lines_on": False,
     "axis_line_slider": 0.5,
+    "coco_class_filter": None,  # list of COCO class_ids, or None/empty = show all
 }
 
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "..", "assets", "settings.json")

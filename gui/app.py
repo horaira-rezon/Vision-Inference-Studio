@@ -20,6 +20,8 @@ from gui.left_sidebar import LeftSidebar
 from gui.media_view import MediaView
 from gui.input_dialogs import ChoiceWindow
 from gui.vision_task_window import VisionTaskWindow, ArchitectureWindow
+from gui.coco_classes_window import CocoClassesWindow
+from assets.detection.coco_classes import COCO_MODEL_NAME
 from models.factory import create_model
 
 NOTICE_COLORS = {
@@ -53,6 +55,7 @@ class MainApp(ctk.CTkFrame):
         self._frame_after_id = None
         self._display_timestamps = deque(maxlen=120)
         self.config_window = None
+        self.coco_classes_window = None
         self.display_scale = 1.0
         self.flip_vertical_enabled = False
         self.flip_horizontal_enabled = False
@@ -297,6 +300,7 @@ class MainApp(ctk.CTkFrame):
         self._show_notice(f"Vision task selected: {task}", "warn")
         self.left_sidebar.model_weight_btn.configure(state="normal")
         self.left_sidebar.unload_tasks_btn.configure(state="disabled")
+        self._refresh_coco_button_state()
         if self.config_window is not None and self.config_window.winfo_exists():
             self.config_window._refresh_from_settings()
 
@@ -316,6 +320,7 @@ class MainApp(ctk.CTkFrame):
         self._set_dot(self.left_sidebar.model_dot, "warn")
         self._show_notice(f"Loading {architecture} model...", "warn")
         self.left_sidebar.model_weight_btn.configure(state="disabled")
+        self.left_sidebar.coco_classes_btn.configure(state="disabled")
         threading.Thread(target=self._load_model_async, args=(task, architecture, path), daemon=True).start()
 
     def _load_model_async(self, task, architecture, path):
@@ -332,6 +337,9 @@ class MainApp(ctk.CTkFrame):
         self.vision_task = task
         self.model_architecture = architecture
         self.model_path = path
+        is_coco = architecture == "yolo" and path == COCO_MODEL_NAME
+        if not is_coco:
+            self._close_coco_window()
         if task == "classification":
             self.settings.set("tracker_mode", "none")
         self._last_detection_error = None
@@ -339,14 +347,63 @@ class MainApp(ctk.CTkFrame):
         self._show_notice(f"Model loaded: {os.path.basename(path)}", "ok")
         self.left_sidebar.model_weight_btn.configure(state="normal")
         self.left_sidebar.unload_tasks_btn.configure(state="normal")
+        self._refresh_coco_button_state()
         if self.config_window is not None and self.config_window.winfo_exists():
             self.config_window._refresh_from_settings()
+
+    def _close_coco_window(self):
+        if self.coco_classes_window is not None and self.coco_classes_window.winfo_exists():
+            self.coco_classes_window.destroy()
+        self.coco_classes_window = None
 
     def _on_model_load_failed(self):
         self._show_notice("Model loading failed", "error")
         self.left_sidebar.model_weight_btn.configure(state="normal")
         self.left_sidebar.unload_tasks_btn.configure(state="disabled")
+        self._refresh_coco_button_state()
         self._set_dot(self.left_sidebar.model_dot, "error")
+
+    def _refresh_coco_button_state(self):
+        self.left_sidebar.coco_classes_btn.configure(state="normal" if self.vision_task == "detection" else "disabled")
+
+    def open_coco_classes(self):
+        if self.vision_task != "detection":
+            self._show_notice("Select the Detection vision task first", "warn")
+            VisionTaskWindow(self.master, self._on_task_selected)
+            return
+        if self.model_architecture == "yolo" and self.model_path == COCO_MODEL_NAME:
+            self._raise_coco_window()
+            return
+        self._set_dot(self.left_sidebar.model_dot, "warn")
+        self._show_notice("Loading COCO-pretrained model...", "warn")
+        self.left_sidebar.model_weight_btn.configure(state="disabled")
+        self.left_sidebar.coco_classes_btn.configure(state="disabled")
+        threading.Thread(target=self._load_coco_model_async, daemon=True).start()
+
+    def _load_coco_model_async(self):
+        try:
+            model = create_model("detection", "yolo", COCO_MODEL_NAME)
+            self.after(0, lambda: self._on_coco_model_loaded(model))
+        except Exception:
+            self.after(0, self._on_model_load_failed)
+
+    def _on_coco_model_loaded(self, model):
+        self._on_model_loaded(model, "detection", "yolo", COCO_MODEL_NAME)
+        if self.detection_worker:
+            self.detection_worker.set_class_filter(self.settings.get("coco_class_filter") or [])
+        self._raise_coco_window()
+
+    def _raise_coco_window(self):
+        if self.coco_classes_window is not None and self.coco_classes_window.winfo_exists():
+            self.coco_classes_window.lift()
+            self.coco_classes_window.focus_force()
+            return
+        self.coco_classes_window = CocoClassesWindow(self.master, self.settings, on_change=self._on_coco_classes_changed)
+
+    def _on_coco_classes_changed(self, class_ids):
+        self.settings.set("coco_class_filter", sorted(class_ids))
+        if self.detection_worker:
+            self.detection_worker.set_class_filter(class_ids)
 
     def _unload_model(self):
         if self.detection_worker:
@@ -365,11 +422,13 @@ class MainApp(ctk.CTkFrame):
 
     def unload_all_tasks(self):
         self._unload_model()
+        self._close_coco_window()
         self.vision_task = None
         self._last_detection_error = None
         self._set_dot(self.left_sidebar.model_dot, "idle")
         self.left_sidebar.model_weight_btn.configure(state="disabled")
         self.left_sidebar.unload_tasks_btn.configure(state="disabled")
+        self._refresh_coco_button_state()
         if self.config_window is not None and self.config_window.winfo_exists():
             self.config_window._refresh_from_settings()
         self._show_notice("All vision tasks unloaded", "idle")
@@ -944,4 +1003,3 @@ class MainApp(ctk.CTkFrame):
         self.recorder.stop_recording()
         self._stop_current_source()
         self._unload_model()
-
