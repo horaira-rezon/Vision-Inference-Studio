@@ -99,7 +99,7 @@ class CocoClassesWindow(ctk.CTkToplevel):
         self.status_label.pack(padx=24, pady=(0, 8), anchor="w")
 
         if self.pending:
-            desc.configure(text="Check whichever classes you want detected, or use Select All / Clear All. Nothing checked means all 80. Click Start Detection when ready.")
+            desc.configure(text="Check whichever classes you want detected, or use Select All / Clear All. Nothing checked means all 80.")
             start_btn = ctk.CTkButton(
                 self, text="Start Detection", command=self._start_detection,
                 fg_color=ACCENT, hover_color="#1d4ed8", font=ctk.CTkFont(size=14, weight="bold"),
