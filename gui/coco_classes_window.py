@@ -8,8 +8,8 @@ CARD_BG = "#151c26"
 ACCENT = "#2563eb"
 DESC_COLOR = "gray60"
 
-DESC_LIVE = "Check whichever classes you want detected. Leave nothing checked to show all 80."
-DESC_PENDING = "Check whichever classes you want detected, or use Select All / Clear All. Nothing checked means all 80. Click Start Detection when ready."
+DESC_LIVE = "Check whichever classes you want detected. Nothing checked means all 80. You can always re-open this window later to change your selection."
+DESC_PENDING = "Select All / Clear All / Check whichever classes you want detected. Nothing checked means all 80. Once you click Start Detection, this window will close and the video feed will appear. You can always re-open this window later to change your selection."
 
 
 class CocoClassesWindow(ctk.CTkToplevel):
