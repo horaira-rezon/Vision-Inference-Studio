@@ -9,7 +9,7 @@ ACCENT = "#2563eb"
 DESC_COLOR = "gray60"
 
 DESC_LIVE = "Check whichever classes you want detected. Nothing checked means all 80. You can always re-open this window later to change your selection."
-DESC_PENDING = "Select All / Clear All / Check whichever classes you want detected. Nothing checked means all 80. Once you click Start Detection, this window will close and the video feed will appear. You can always re-open this window later to change your selection."
+DESC_PENDING = "Select All / Clear All / Check whichever classes you want detected. Nothing checked means all 80."
 
 
 class CocoClassesWindow(ctk.CTkToplevel):
